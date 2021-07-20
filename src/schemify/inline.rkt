@@ -207,7 +207,7 @@
      [`(begin-unsafe ,exps ...)
       `(begin-unsafe . ,(clone-body exps env mutated))]
      [`(set! ,id ,rhs)
-      `(set! ,id ,(clone-expr rhs env mutated))]
+      `(set! ,(clone-expr id env mutated) ,(clone-expr rhs env mutated))]
      [`(#%variable-reference) v]
      [`(#%variable-reference ,id)
       `(#%variable-reference ,(clone-expr id env mutated))]
@@ -266,6 +266,7 @@
                                              (known-predicate-type k)
                                              (known-struct-predicate-type-id k)
                                              (known-struct-predicate-authentic? k)
+                                             (known-struct-predicate-sealed? k)
                                              (needed->list needed))]
        [else
         (known-predicate (known-procedure-arity-mask k)

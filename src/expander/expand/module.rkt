@@ -41,14 +41,15 @@
          "parsed.rkt"
          "expanded+parsed.rkt"
          "append.rkt"
-         "save-and-restore.rkt")
+         "save-and-restore.rkt"
+         "module-prompt.rkt")
 
 (add-core-form!
  'module
  (lambda (s ctx)
    (unless (eq? (expand-context-context ctx) 'top-level)
      (log-expand ctx 'prim-module #f)
-     (raise-syntax-error #f "allowed only at the top level" s))
+     (raise-syntax-error #f "allowed only at the top level or in a module top-level" s))
    (performance-region
     ['expand 'module]
     (expand-module s ctx #f))))
@@ -80,7 +81,7 @@
  (lambda (s ctx)
    (log-expand ctx 'prim-declare #f)
    ;; The `#%module-begin` expander handles `#%declare`
-   (raise-syntax-error #f "not allowed outside of a module body" s)))
+   (raise-syntax-error #f "not allowed outside of a module top-level" s)))
 
 ;; ----------------------------------------
 
@@ -282,6 +283,9 @@
      
      ;; Accumulated declared submodule names for `syntax-local-submodules`
      (define declared-submodule-names (make-hasheq))
+
+     ;; Requires that were lifted during `#%module-begin` expansion:
+     (define initial-lifted-requires (get-require-lifts (expand-context-require-lifts ctx)))
      
      ;; Module expansion always parses the module body along the way,
      ;; even if `to-parsed?` in `ctx` is not true. The body is parsed
@@ -298,7 +302,8 @@
      
      ;; Passes 1 and 2 are nested via `begin-for-syntax`:
      (define expression-expanded-bodys
-       (let pass-1-and-2-loop ([bodys bodys] [phase phase] [keep-stops? (stop-at-module*? ctx)])
+       (let pass-1-and-2-loop ([bodys bodys] [phase phase] [keep-stops? (stop-at-module*? ctx)]
+                                             [initial-lifted-requires initial-lifted-requires])
 
          ;; - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          ;; Pass 1: partially expand to discover all bindings and install all 
@@ -325,7 +330,8 @@
                                                 [require-lifts (make-require-lift-context
                                                                 phase
                                                                 (make-parse-lifted-require m-ns self requires+provides
-                                                                                           #:declared-submodule-names declared-submodule-names))]
+                                                                                           #:declared-submodule-names declared-submodule-names)
+                                                                initial-lifted-requires)]
                                                 [to-module-lifts (make-to-module-lift-context
                                                                   phase
                                                                   #:shared-module-ends module-ends
@@ -481,7 +487,10 @@
                    [lifts #f]
                    [module-lifts #f]
                    [to-module-lifts #f]
-                   [require-lifts #f]))
+                   [require-lifts (make-require-lift-context
+                                   phase
+                                   (make-parse-lifted-require m-ns self requires+provides
+                                                              #:declared-submodule-names (make-hasheq)))]))
    
    (define mb-scopes-s
      (if keep-enclosing-scope-at-phase
@@ -773,7 +782,7 @@
           (define ct-m-ns (namespace->namespace-at-phase m-ns (add1 phase)))
           (prepare-next-phase-namespace partial-body-ctx)
           (log-expand partial-body-ctx 'phase-up)
-          (define nested-bodys (pass-1-and-2-loop (m 'e) (add1 phase) #f))
+          (define nested-bodys (pass-1-and-2-loop (m 'e) (add1 phase) #f null))
           (log-expand partial-body-ctx 'next-group)
           (namespace-run-available-modules! m-ns (add1 phase)) ; to support running `begin-for-syntax`
           (eval-nested-bodys nested-bodys (add1 phase) ct-m-ns self partial-body-ctx)
@@ -820,6 +829,13 @@
                                                       #:in exp-body
                                                       #:as-transformer? #t))
           (add-defined-syms! requires+provides syms phase #:as-transformer? #t)
+          (define (install-values vals)
+            ;; Install transformers in the namespace for expansion:
+            (for ([sym (in-list syms)]
+                  [val (in-list vals)]
+                  [id (in-list ids)])
+              (maybe-install-free=id-in-context! val id phase partial-body-ctx)
+              (namespace-set-transformer! m-ns phase sym val)))
           ;; Expand and evaluate RHS:
           (define-values (exp-rhs parsed-rhs vals)
             (expand+eval-for-syntaxes-binding 'define-syntaxes
@@ -830,13 +846,13 @@
                                                             [module-lifts #f]
                                                             [to-module-lifts #f]
                                                             [need-eventually-defined need-eventually-defined])
-                                              #:log-next? #f))
-          ;; Install transformers in the namespace for expansion:
-          (for ([sym (in-list syms)]
-                [val (in-list vals)]
-                [id (in-list ids)])
-            (maybe-install-free=id-in-context! val id phase partial-body-ctx)
-            (namespace-set-transformer! m-ns phase sym val))
+                                              #:log-next? #f
+                                              #:wrap (lambda (go)
+                                                       (call-with-module-prompt/value-list
+                                                        'define-syntaxes
+                                                        go
+                                                        ids
+                                                        install-values))))
           (log-expand partial-body-ctx 'exit-case `(,(m 'define-syntaxes) ,ids ,exp-rhs))
           (define parsed-body (parsed-define-syntaxes (keep-properties-only exp-body) ids syms parsed-rhs))
           (cons (if (expand-context-to-parsed? partial-body-ctx)
@@ -1317,12 +1333,31 @@
                   body))
     (cond
      [(parsed-define-values? p)
+      (define syms (parsed-define-values-syms p))
       (define ids (parsed-define-values-ids p))
-      (define vals (eval-for-bindings 'define-values ids (parsed-define-values-rhs p) phase m-ns ctx))
-      (for ([id (in-list ids)]
-            [sym (in-list (parsed-define-values-syms p))]
-            [val (in-list vals)])
-        (namespace-set-variable! m-ns phase sym val))]
+      (eval-for-bindings 'define-values ids (parsed-define-values-rhs p) phase m-ns ctx
+                         #:wrap (lambda (go)
+                                  ;; prompt is outside setting variables, to be consistent
+                                  ;; with a visit where definitions have prompts
+                                  (call-with-module-prompt/value-list
+                                   'define
+                                   go
+                                   ids
+                                   (lambda (vals)
+                                     (for ([sym (in-list syms)]
+                                           [val (in-list vals)])
+                                       (namespace-set-variable! m-ns phase sym val))))))
+      ;; In case the module prompt was used to escape, to be consistent
+      ;; with a visit later, complain if variables are not set
+      (for ([sym (in-list syms)])
+        (namespace-get-variable m-ns phase sym
+                                (lambda ()
+                                  (raise
+                                   (exn:fail:contract:variable
+                                    (string-append "define-values: skipped variable definition during expansion\n"
+                                                   "  variable: " (symbol->string sym))
+                                    (current-continuation-marks)
+                                    sym)))))]
      [(or (parsed-define-syntaxes? p)
           (semi-parsed-begin-for-syntax? p))
       ;; already evaluated during expansion
@@ -1336,11 +1371,12 @@
       (parameterize ([current-namespace m-ns])
         (parameterize-like
          #:with ([current-expand-context ctx])
-         (eval-single-top
-          (compile-single p (make-compile-context
-                             #:namespace m-ns
-                             #:phase phase))
-          m-ns)))])))
+         (let ([c (compile-single p (make-compile-context
+                                     #:namespace m-ns
+                                     #:phase phase))])
+           (call-with-module-prompt
+            (lambda ()
+              (eval-single-top c m-ns))))))])))
 
 ;; ----------------------------------------
 

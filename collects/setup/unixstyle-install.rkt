@@ -18,10 +18,14 @@
 ;;   - `make-install-copytree': copies some toplevel directories, skips ".*"
 ;;     subdirs, and rewrites "config.rkt", but no uninstaller
 ;;     (used by `make install') (requires an additional `origtree' argument)
+;;   - `make-install-libzo-move' : moves "compiled" directories from the
+;;     "collects" and "pkg" directories under sharerkt to a "compiled"
+;;     tree under librkt (requires DESTDIR to be set if it's being
+;;     used for the installation)
 ;;   - `make-install-destdir-fix': fixes paths in binaries, laucnhers, and
 ;;     config.rkt (used by `make install' to fix a DESTDIR) (requires exactly
-;;     the same args as `make-install-copytree' (prefixed) and requires a
-;;     DESTDIR setting)
+;;     the same args as `make-install-copytree' (prefixed) plus one more
+;;     to indicate libzo mode, and requires a DESTDIR setting)
 ;; * rktdir: The source racket directory
 ;; * Path names that should be moved/copied (bin, collects, doc, lib, ...)
 ;;   or a sigle path that is used to automatically build the set of
@@ -56,13 +60,14 @@
                 [(sharerkt) "share"]
                 [(config) "etc"]
                 [(collects) "collects"]
-                [(apps) "share/applications"]
+                [(pkgs) (build-path "share" "pkgs")]
+                [(apps) (build-path "share" "applications")]
                 [else (symbol->string name)])))
 (define dirs (map (lambda (name) (list name 
                                        (if base-destdir
                                            (build-dest-arg name)
                                            (get-arg))))
-		  '(bin collects doc lib includerkt librkt sharerkt config apps man #|src|#)))
+		  '(bin collects pkgs doc lib includerkt librkt sharerkt config apps man #|src|#)))
 
 (define (dir: name)
   (cadr (or (assq name dirs) (error 'getdir "unknown dir name: ~e" name))))
@@ -81,6 +86,7 @@
     (case dir
       [(bin)      #f]
       [(collects) 1]
+      [(pkgs)     1]
       [(doc)      1]
       [(include)  1]
       ;; if shared libraries are used, then these files should be moved
@@ -150,6 +156,12 @@
       (or (equal? f "share/applications")
           (skip-filter f)))))
 
+(define (add-pkgs-skip skip-filter)
+  (let ([share/pkgs (make-path "share" "pkgs")])
+    (lambda (f)
+      (or (equal? f share/pkgs)
+          (skip-filter f)))))
+
 ;; copy a file or a directory (recursively), preserving time stamps
 ;; (racket's copy-file preservs permission bits)
 (define (cp src dst #:build-path? [build-path? #f])
@@ -209,21 +221,24 @@
   (cp src dst #:build-path? #t)
   (register-change! 'cp src dst))
 
-(define (fix-executable file)
+(define (fix-executable file #:ignore-non-executable? [ignore-non-executable? #f])
   (define (fix-binary file)
     (define (fix-one tag dir)
       (let-values ([(i o) (open-input-output-file file #:exists 'update)])
-        (let ([m (regexp-match-positions tag i)])
-          (unless m
-            (error
-             (format "could not find collection-path label in executable: ~a"
-                     file)))
-          (file-position o (cdar m))
-          (display dir o)
-          (write-byte 0 o)
-          (write-byte 0 o)
-          (close-input-port i)
-          (close-output-port o))))
+        (cond
+          [(regexp-match-positions tag i)
+           => (lambda (m)
+                (file-position o (cdar m))
+                (display dir o)
+                (write-byte 0 o)
+                (write-byte 0 o))]
+          [else
+           (unless ignore-non-executable?
+             (error
+              (format "could not find collection-path label in executable: ~a"
+                      file)))])
+        (close-input-port i)
+        (close-output-port o)))
     (fix-one #rx#"coLLECTs dIRECTORy:" (dir: 'collects))
     (fix-one #rx#"coNFIg dIRECTORy:" (dir: 'config)))
   (define (fix-script file)
@@ -234,19 +249,21 @@
                   (error (format "could not find binpath block in script: ~a"
                                  file)))]
            [m2 (regexp-match-positions
-                #rx#"\n# {{{ librktdir\n(.*?\n)# }}} librktdir\n" buf)])
+                #rx#"\n# unixstyle-install: use librktdir\n" buf)])
       ;; 'truncate file to keep it executable
       (with-output-to-file file #:exists 'truncate
         (lambda ()
           (write-bytes buf (current-output-port) 0 (caadr m))
           (define (escaped-dir: sym)
             (regexp-replace* #rx"[\"`'$\\]" (dir: sym) "\\\\&"))
-          (printf "bindir=\"~a\"\n" (escaped-dir: 'bin))
-          (when m2
-            (write-bytes buf (current-output-port) (cdadr m) (caadr m2))
-            (printf "librktdir=\"~a\"\n" (escaped-dir: 'librkt)))
-          (write-bytes buf (current-output-port) (cdadr (or m2 m)))))))
-  (let ([magic (with-input-from-file file (lambda () (read-bytes 10)))])
+          (printf "bindir=\"~a\"\n" (if m2
+                                        (escaped-dir: 'librkt)
+                                        (escaped-dir: 'bin)))
+          (write-bytes buf (current-output-port) (cdadr m))))))
+  (let ([magic (with-input-from-file file (lambda () (let ([r (read-bytes 10)])
+                                                       (if (eof-object? r)
+                                                           #""
+                                                           r))))])
     (cond [(or (regexp-match #rx#"^\177ELF" magic)
                (regexp-match #rx#"^\316\372\355\376" magic)
                (regexp-match #rx#"^\317\372\355\376" magic))
@@ -261,16 +278,16 @@
                (mv temp file)))]
           [(regexp-match #rx#"^#!/bin/sh" magic)
            (fix-script file)]
+          [ignore-non-executable? (void)]
           [else (error (format "unknown executable: ~a" file))])))
 
-(define (fix-executables bindir librktdir [binfiles #f])
-  (parameterize ([current-directory bindir])
-    (for ([f (in-list (or binfiles (ls)))] #:when (file-exists? f))
-      (fix-executable f)))
-  ;; fix the gracket & starter executables too
-  (parameterize ([current-directory librktdir])
-    (when (file-exists? "gracket") (fix-executable "gracket"))
-    (when (file-exists? "starter") (fix-executable "starter"))))
+(define (fix-executables bindir librktdir [binfiles #f] [libfiles #f])
+  (for ([dir (in-list (list bindir librktdir))]
+        [files (in-list (list binfiles libfiles))]
+        [ignore-non-executable? (in-list (list #f #t))])
+    (parameterize ([current-directory dir])
+      (for ([f (in-list (or files (ls)))] #:when (file-exists? f))
+        (fix-executable f #:ignore-non-executable? ignore-non-executable?)))))
 
 (define (fix-desktop-files appsdir bindir sharerktdir [appfiles #f])
   ;; For absolute mode, change `Exec' and `Icon' lines to
@@ -299,6 +316,31 @@
           #:exists 'truncate/replace
           (lambda (o)
             (map (lambda (s) (displayln s o)) new-ls)))))))
+
+;; change references to "pkgs/..." to refer to `pkgs-dir`
+(define (fix-pkg-links share-dir pkgs-dir)
+  (define links-rktd (build-path share-dir "links.rktd"))
+  (when (file-exists? links-rktd)
+    (printf "Fixing package links at: ~a...\n" links-rktd)
+    (define entries (call-with-input-file links-rktd read))
+    (call-with-output-file*
+     links-rktd
+     #:exists 'truncate
+     (lambda (o)
+       (fprintf o "(\n")
+       (for ([e (in-list entries)])
+         (define p (cadr e))
+         (fprintf o " ")
+         (define m (regexp-match #rx"^pkgs/(.*)$" p))
+         (write
+          (if m
+              (list* (car e)
+                     (string-append pkgs-dir "/" (cadr m))
+                     (cddr e))
+              e)
+          o)
+         (newline o))
+       (fprintf o ")\n")))))
 
 ;; remove and record all empty dirs
 (define (remove-empty-dirs dir)
@@ -367,12 +409,16 @@
 (define write-config
   (case-lambda
     [()  (write-config (dir: 'config))]
-    [(configdir)
+    [(configdir) (write-config configdir #f)]
+    [(configdir libzo?)
      (define (cpath . xs)
        (apply make-path configdir xs))
      (define (ftime file)
        (and (file-exists? file) (file-or-directory-modify-seconds file)))
      (let* ([src (cpath "config.rktd")])
+       (define link-shared?
+         ;; before "config.rktd" is potentially modified:
+         (eq? 'shared (cross-system-type 'link)))
        (printf "Rewriting configuration file at: ~a...\n" src)
        (define old (or (and (file-exists? src)
                             (call-with-input-file src read))
@@ -386,15 +432,21 @@
            (printf ";; generated by unixstyle-install\n")
            (printf "#hash(\n")
            (out! 'doc-dir (dir: 'doc))
-           (when (eq? 'shared (cross-system-type 'link)) ; never true for now
+           (when link-shared? ; never true for now
              (out! 'dll-dir (dir: 'lib)))
            (out! 'lib-dir (dir: 'librkt))
+           (out! 'pkgs-dir (dir: 'pkgs))
            (out! 'share-dir (dir: 'sharerkt))
            (out! 'include-dir (dir: 'includerkt))
            (out! 'bin-dir (dir: 'bin))
            (out! 'apps-dir (dir: 'apps))
            (out! 'man-dir (dir: 'man))
            (out! 'absolute-installation? #t)
+           (when libzo?
+             (out! 'compiled-file-roots
+                   (list 'same
+                         (path->string
+                          (build-path (dir: 'librkt) "compiled")))))
            ;; Preserve all other keys:
            (for ([(key val) (in-hash old)])
              (unless (hash-ref handled key #f)
@@ -470,6 +522,7 @@
 
 ;; --------------------------------------------------------------------------
 
+;; Does not support moving "collects" or "pkgs" outside of "share"
 (define (move/copy-distribution move? bundle?)
   (define do-tree (move/copy-tree move?))
   (current-directory rktdir)
@@ -477,6 +530,7 @@
     (error "Cannot handle distribution of shared-libraries (yet)"))
   (with-handlers ([exn? (lambda (e) (undo-changes) (raise e))])
     (define binfiles (ls* "bin"))
+    (define libfiles (ls* "lib"))
     (if (eq? 'windows (cross-system-type))
         ;; Windows executables appear in the immediate directory:
         (for ([f (in-list (directory-list))])
@@ -486,12 +540,13 @@
         ;; All other platforms use "bin":
         (do-tree "bin"      'bin))
     (do-tree "collects" 'collects)
+    (do-tree (make-path "share" "pkgs") 'pkgs #:missing 'skip)
     (do-tree "doc"      'doc #:missing 'skip) ; not included in text distros
     (do-tree "lib"      'librkt)
     (do-tree "include"  'includerkt)
     (define appfiles (ls* "share/applications"))
     (do-tree "share/applications" 'apps #:missing 'skip) ; Unix only
-    (parameterize ([current-skip-filter (make-apps-skip)])
+    (parameterize ([current-skip-filter (add-pkgs-skip (make-apps-skip))])
       (do-tree "share" 'sharerkt))
     (do-tree "etc"      'config)
     (unless (eq? 'windows (cross-system-type))
@@ -509,13 +564,16 @@
       (error (format "leftovers in source tree: ~s" (ls))))
     ;; we need to know which files need fixing
     (unless bundle?
-      (fix-executables (dir: 'bin) (dir: 'librkt) binfiles)
+      (fix-executables (dir: 'bin) (dir: 'librkt) binfiles libfiles)
       (fix-desktop-files (dir: 'apps) (dir: 'bin) (dir: 'sharerkt) appfiles)
       (write-uninstaller)
       (write-config)))
   (when move?
     (current-directory (dirname rktdir))
     (delete-directory rktdir)))
+
+(define (equal-path? a b)
+  (equal? (explode-path a) (explode-path b)))
 
 (define dot-file?
   ;; skip all dot-names, except ".LOCK..."
@@ -532,36 +590,75 @@
   (with-handlers ([exn? (lambda (e) (undo-changes) (raise e))])
     (set! yes-to-all? #t) ; non-interactive
     (copytree "collects" 'collects)
-    (copytree "share"    'sharerkt #:missing 'skip)
+    (copytree (make-path "share" "pkgs") 'pkgs #:missing 'skip)
+    (parameterize ([current-skip-filter (add-pkgs-skip (current-skip-filter))])
+      (copytree "share"  'sharerkt #:missing 'skip))
     (copytree "doc"      'doc      #:missing 'skip)
     (copytree "etc"      'config   #:missing 'skip)
+    (unless (equal-path? (dir: 'pkgs) (build-path (dir: 'sharerkt) "pkgs"))
+      (fix-pkg-links (dir: 'sharerkt) (dir: 'pkgs)))
     (unless origtree? (write-config))))
+
+(define (remove-dest destdir p)
+  (if destdir
+      (let* ([destdirlen (string-length destdir)]
+             [pfx (and (< destdirlen (string-length p))
+                       (substring p 0 destdirlen))])
+        (if (equal? pfx destdir)
+            (regexp-replace #rx"^/*" (substring p destdirlen) "/")
+            (error (format "expecting a DESTDIR prefix of ~s in ~s" destdir p))))
+      p))
+
+(define (make-install-libzo-move)
+  (define destdir (getenv "DESTDIR"))
+  (define collectsdir (dir: 'collects))
+  (define pkgsdir     (dir: 'pkgs))
+  (define configdir   (dir: 'config))
+  (define (move dir)
+    (define dest-rel (regexp-replace #rx"^/*" (remove-dest destdir dir) ""))
+    (define dest (build-path (dir: 'librkt) "compiled" dest-rel))
+    (printf "Moving \"compiled\" in ~a to ~a\n" dir dest)
+    (let loop ([dir dir] [dest dest])
+      (for ([f-path (in-list (directory-list dir))])
+        (define f (path->string f-path))
+        (define f-abs (build-path dir f))
+        (when (directory-exists? f-abs)
+          (define f-dest (build-path dest f-path))
+          (cond
+            [(equal? f "info-domain")
+             ;; Skip move for "info-domain', because the file
+             ;; in "compiled" is not a ".zo" file and needs
+             ;; to stay with the "info-domain" collection
+             (void)]
+            [(equal? f "compiled")
+             (make-directory* dest)
+             (rm f-dest)
+             (rename-file-or-directory f-abs f-dest)]
+            [else
+             (loop f-abs f-dest)])))))
+  (move collectsdir)
+  (move pkgsdir)
+  (write-config configdir #t))
 
 (define (make-install-destdir-fix)
   (define destdir
     (or (getenv "DESTDIR")
         (error "missing DESTDIR value for make-install-destdir-fix")))
-  (define destdirlen (string-length destdir))
   (define origtree? (equal? "yes" (get-arg)))
+  (define libzo? (equal? "libzo" (get-arg)))
   ;; grab paths before we change them
   (define bindir      (dir: 'bin))
   (define librktdir   (dir: 'librkt))
   (define sharerktdir   (dir: 'sharerkt))
   (define configdir   (dir: 'config))
   (define appsdir   (dir: 'apps))
-  (define (remove-dest p)
-    (let ([pfx (and (< destdirlen (string-length p))
-                    (substring p 0 destdirlen))])
-      (if (equal? pfx destdir)
-        (regexp-replace #rx"^/*" (substring p destdirlen) "/")
-        (error (format "expecting a DESTDIR prefix of ~s in ~s" destdir p)))))
-  (set! dirs (map (lambda (d) (list (car d) (remove-dest (cadr d)))) dirs))
+  (set! dirs (map (lambda (d) (list (car d) (remove-dest destdir (cadr d)))) dirs))
   ;; no need to send an explicit binfiles argument -- this function is used
   ;; only when DESTDIR is present, so we're installing to a directory that
   ;; has only our binaries
   (fix-executables bindir librktdir)
   (fix-desktop-files appsdir bindir sharerktdir)
-  (unless origtree? (write-config configdir)))
+  (unless origtree? (write-config configdir libzo?)))
 
 (define (post-adjust)
   (when (regexp-match? #rx"--source" (car adjust-mode))
@@ -666,5 +763,6 @@
      (move/copy-distribution #f #t)]
     [(post-adjust) (post-adjust)]
     [(make-install-copytree)    (make-install-copytree)]
+    [(make-install-libzo-move)  (make-install-libzo-move)]
     [(make-install-destdir-fix) (make-install-destdir-fix)]
     [else   (error (format "unknown operation: ~e" op))]))

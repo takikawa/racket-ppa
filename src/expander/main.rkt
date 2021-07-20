@@ -36,6 +36,7 @@
          (only-in "syntax/cache.rkt" cache-place-init!)
          (only-in "syntax/syntax.rkt" syntax-place-init!)
          (only-in "syntax/scope.rkt" scope-place-init!)
+         "syntax/serialize.rkt"
          (only-in "eval/module-cache.rkt" module-cache-place-init!)
          (only-in "common/performance.rkt" performance-place-init!)
          (only-in "eval/shadow-directory.rkt" shadow-directory-place-init!))
@@ -69,6 +70,7 @@
 
          find-library-collection-paths
          find-library-collection-links
+         find-compiled-file-roots
          find-main-config
 
          current-library-collection-paths
@@ -134,6 +136,9 @@
          syntax-shift-phase-level
          bound-identifier=?
 
+         syntax-serialize
+         syntax-deserialize
+
          compiled-expression-recompile)
 
 ;; ----------------------------------------
@@ -174,6 +179,9 @@
                                    #:register-builtin? #t
                                    #:protected? #t)
        (declare-hash-based-module! '#%linklet-expander linklet-expander-primitives #:namespace ns
+                                   ;; Names that shadow linklet primitives need to be registered,
+                                   ;; and it's ok if we register a few more:
+                                   #:register-builtin? #t
                                    #:protected? #t)
        (declare-reexporting-module! '#%linklet (list '#%linklet-primitive
                                                      '#%linklet-expander)

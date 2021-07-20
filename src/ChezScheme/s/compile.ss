@@ -487,7 +487,7 @@
                            (if omit-rtds? (constant fasl-omit-rtds) 0))])
               (and (not (fx= flags 0)) flags))])
      (c-build-fasl x t a?)
-     ($fasl-start p t situation x
+     ($fasl-start p t situation x a?
        (lambda (x p) (c-faslobj x t p a?)))))
 
 (define-record-type visit-chunk
@@ -611,7 +611,8 @@
                             (parameterize ([$target-machine (machine-type)])
                               (let ([t ($fasl-table)])
                                 ($fasl-enter x1 t (constant annotation-all) 0)
-                                ($fasl-start wpoop t (constant fasl-type-visit-revisit) x1 (lambda (x p) ($fasl-out x p t (constant annotation-all)))))))))))
+                                ($fasl-start wpoop t (constant fasl-type-visit-revisit) x1 (constant annotation-all)
+                                             (lambda (x p) ($fasl-out x p t (constant annotation-all)))))))))))
                   (let-values ([(rcinfo* lpinfo* final*) (compile-file-help1 x1 source-info-string)])
                     (when hostop
                       ; the host library file contains expander output possibly augmented with
@@ -622,7 +623,8 @@
                           (parameterize ([$target-machine (machine-type)])
                             (let ([t ($fasl-table)])
                               ($fasl-enter x1 t (constant annotation-all) 0)
-                              ($fasl-start hostop t (constant fasl-type-visit-revisit) x1 (lambda (x p) ($fasl-out x p t (constant annotation-all)))))))))
+                              ($fasl-start hostop t (constant fasl-type-visit-revisit) x1 (constant annotation-all)
+                                           (lambda (x p) ($fasl-out x p t (constant annotation-all)))))))))
                     (cfh0 (+ n 1) (cons rcinfo* rrcinfo**) (cons lpinfo* rlpinfo**) (cons final* rfinal**)))))))))))
 
 (define library/program-info?
@@ -1248,7 +1250,7 @@
       (lambda (node thunk)
         (build-primcall '$install-library/rt-code `(quote ,(library-node-uid node)) thunk)))
 
-    (define-pass patch : Lsrc (ir env) -> Lsrc ()
+    (define-pass patch : Lsrc (ir env exts-table) -> Lsrc ()
       (definitions
         (define with-initialized-ids
           (lambda (old-id* proc)
@@ -1297,7 +1299,17 @@
         [(letrec* ([,x* ,e*] ...) ,body)
          (with-initialized-ids x*
            (lambda (x*)
-             `(letrec* ([,x* ,(map Expr e*)] ...) ,(Expr body))))])
+             `(letrec* ([,x* ,(map Expr e*)] ...) ,(Expr body))))]
+        [(cte-optimization-loc ,box ,e ,exts)
+         (define new-exts (or (hashtable-ref exts-table exts #f)
+                              (let ([new-exts (map (lambda (p)
+                                                     (let ([x (car p)])
+                                                       (cons (or (prelex-operand x) x) (cdr p))))
+                                                   exts)])
+                                (hashtable-set! exts-table exts new-exts)
+                                new-exts)))
+         (let ([e (Expr e)])
+           `(cte-optimization-loc ,box ,e ,new-exts))])
       (CaseLambdaClause : CaseLambdaClause (ir) -> CaseLambdaClause ()
         [(clause (,x* ...) ,interface ,body)
          (with-initialized-ids x*
@@ -1365,7 +1377,8 @@
                 (nanopass-case (Lexpand Program) (program-node-ir program)
                   [(program ,uid ,body) body])
                 node*)
-              (make-patch-env (list node*))))))
+              (make-patch-env (list node*))
+              (make-eq-hashtable)))))
 
     (define build-combined-library-ir
       (lambda (cluster*)
@@ -1440,7 +1453,8 @@
                                                    ,body))
                                     body cluster))
                       (build-void) cluster* cluster-idx*)))))
-        (make-patch-env cluster*)))))
+          (make-patch-env cluster*)
+          (make-eq-hashtable)))))
 
   (with-output-language (Lexpand Outer)
     (define add-recompile-info
@@ -1605,7 +1619,8 @@
                     (let ([x (fold-left (lambda (outer ir) (with-output-language (Lexpand Outer) `(group ,outer ,ir)))
                                (car ir*) (cdr ir*))])
                       ($fasl-enter x t (constant annotation-all) 0)
-                      ($fasl-start wpoop t (constant fasl-type-visit-revisit) x (lambda (x p) ($fasl-out x p t (constant annotation-all))))))))))))))
+                      ($fasl-start wpoop t (constant fasl-type-visit-revisit) x (constant annotation-all)
+                                   (lambda (x p) ($fasl-out x p t (constant annotation-all))))))))))))))
 
   (define build-required-library-list
     (lambda (node* visit-lib*)
@@ -2218,26 +2233,31 @@
       [(in out)
        (unless (string? in) ($oops who "~s is not a string" in))
        (unless (string? out) ($oops who "~s is not a string" out))
-       ($maybe-compile-file who in out (compile-program-handler))]
+       ($maybe-compile-file who in out (compile-program-handler))
+       (void)]
       [(in)
        (unless (string? in) ($oops who "~s is not a string" in))
        (let-values ([(in out) (in&out in)])
-         ($maybe-compile-file who in out (compile-program-handler)))]))
+         ($maybe-compile-file who in out (compile-program-handler)))
+       (void)]))
 
   (set-who! compile-to-file
     (rec compile-to-file
       (case-lambda
-        [(sexpr* out) (compile-to-file sexpr* out #f)]
-        [(sexpr* out sfd)
+        [(sexpr* out) (compile-to-file sexpr* out #f #f)]
+        [(sexpr* out sfd) (compile-to-file sexpr* out sfd #f)]
+        [(sexpr* out sfd force-host-out?)
          (unless (list? sexpr*) ($oops who "~s is not a proper list" sexpr*))
          (unless (string? out) ($oops who "~s is not a string" out))
          (when sfd (unless (source-file-descriptor? sfd) ($oops who "~s is not a source-file descriptor or #f" sfd)))
+         (unless (boolean? force-host-out?) ($oops who "~s is not a boolean" force-host-out?))
          (let ([library? (and (= (length sexpr*) 1) (pair? (car sexpr*)) (eq? (caar sexpr*) 'library))]
                [program? (and (= (length sexpr*) 1) (pair? (car sexpr*)) (eq? (caar sexpr*) 'top-level-program))])
            (define (go)
              (do-compile-to-file who out
                (and library?
-                    (not (eq? (constant machine-type-name) (machine-type)))
+                    (or force-host-out?
+                        (not (eq? (constant machine-type-name) (machine-type))))
                     (format "~a.~s" (path-root out) (machine-type)))
                (constant machine-type-name)
                sfd

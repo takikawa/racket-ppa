@@ -18,7 +18,7 @@
 # define PRESERVE_IN_EXECUTABLE /* empty */
 #endif
 
-/* The config string after : is replaced with ! followed by a sequence
+/* The config string after : is replaced with ! or * followed by a sequence
    of little-endian 4-byte ints:
     start - offset into the binary
     prog_end - offset; start to prog_end is the program region
@@ -31,6 +31,10 @@
      exe_path - program to start (relative is w.r.t. executable)
      dll_path - DLL directory if non-empty (relative is w.r.t. executable)
      cmdline_arg ...
+
+   A * instead of ! at the start means that `-E` should be skipped,
+   so that `(find-system-path 'exec-file)` refers to the started
+   executable instaed of this starter.
 
    For ELF binaries, the absolute values of `start', `decl_end', `prog_end',
    and `end' are ignored if a ".rackcmdl" (starter) or ".rackprog"
@@ -94,6 +98,10 @@ char * volatile _configdir = "coNFIg dIRECTORy:" /* <- this tag stays, so we can
                        "****************************************************************"
                        "****************************************************************";
 static int _configdir_offset = 17; /* Skip permanent tag */
+
+#define XFORM_SKIP_PROC /* empty */
+#define USE_EXE_LOOKUP_VIA_PATH
+#include "self_exe.inc"
 
 typedef struct {
   char *flag;
@@ -174,66 +182,10 @@ static char *string_append(char *s1, char *s2)
   return s;
 }
 
-static char *copy_string(char *s1)
-{
-  int l1;
-  char *s;
-
-  if (!s1) return NULL;
-
-  l1 = strlen(s1);
-
-  s  = (char *)malloc(l1 + 1);
-
-  memcpy(s, s1, l1 + 1);
-
-  return s;
-}
-
-static char *do_path_append(char *s1, int l1, char *s2)
-{
-  int l2;
-  char *s;
-
-  l2 = strlen(s2);
-
-  s  = (char *)malloc(l1 + l2 + 2);
-
-  memcpy(s, s1, l1);
-  if (s[l1 - 1] != '/') {
-    s[l1++] = '/';
-  }
-
-  memcpy(s + l1, s2, l2);
-  s[l1 + l2] = 0;
-
-  return s;
-}
-
-static char *path_append(char *s1, char *s2)
-{
-  return do_path_append(s1, strlen(s1), s2);
-}
-
-static int executable_exists(char *path)
-{
-  return (access(path, X_OK) == 0);
-}
-
 static int as_int(char *_c)
 {
   unsigned char *c = (unsigned char *)_c;
   return c[0] | ((int)c[1] << 8) | ((int)c[2] << 16)  | ((int)c[3] << 24);
-}
-
-static int has_slash(char *s)
-{
-  while (*s) {
-    if (s[0] == '/')
-      return 1;
-    s++;
-  }
-  return 0;
 }
 
 char *absolutize(char *p, char *d)
@@ -262,98 +214,35 @@ static char *next_string(char *s)
   return s + strlen(s) + 1;
 }
 
-typedef unsigned short ELF__Half;
-typedef unsigned int ELF__Word;
-typedef unsigned long ELF__Xword;
-typedef unsigned long ELF__Addr;
-typedef unsigned long ELF__Off;
-
-typedef struct { 
-  unsigned char e_ident[16]; 
-  ELF__Half e_type; 
-  ELF__Half e_machine; 
-  ELF__Word e_version; 
-  ELF__Addr e_entry; 
-  ELF__Off e_phoff; 
-  ELF__Off e_shoff; 
-  ELF__Word e_flags; 
-  ELF__Half e_ehsize; 
-  ELF__Half e_phentsize; 
-  ELF__Half e_phnum; 
-  ELF__Half e_shentsize; 
-  ELF__Half e_shnum;
-  ELF__Half e_shstrndx;
-} ELF__Header;
-
-typedef struct
+static int try_section_shift(const char *me, int *_start, int *_decl_end, int *_prog_end, int *_end)
 {
-  ELF__Word sh_name;
-  ELF__Word sh_type;
-  ELF__Xword sh_flags;
-  ELF__Addr sh_addr;
-  ELF__Off sh_offset;
-  ELF__Xword sh_size;
-  ELF__Word sh_link;
-  ELF__Word sh_info;
-  ELF__Xword sh_addralign;
-  ELF__Xword sh_entsize;
-} Elf__Shdr;
+  int start = 0, end = 0;
+  int is_prog;
+  
+#ifdef OS_X
+  {
+    long len = 0;
+    start = find_mach_o_segment("__PLTSCHEME", &len);
+    end = start + len;
+    is_prog = 1;
+  }
+#else
+  is_prog = find_elf_section_offset(me, ".rackprog", &start, &end);
+#endif
 
-static int try_elf_section(const char *me, int *_start, int *_decl_end, int *_prog_end, int *_end)
-{
-  int fd, i;
-  ELF__Header e;
-  Elf__Shdr s;
-  char *strs;
-
-  fd = open(me, O_RDONLY, 0);
-  if (fd == -1) return 0;
-
-  if (read(fd, &e, sizeof(e)) == sizeof(e)) {
-    if ((e.e_ident[0] == 0x7F)
-	&& (e.e_ident[1] == 'E')
-	&& (e.e_ident[2] == 'L')
-	&& (e.e_ident[3] == 'F')) {
-
-      lseek(fd, e.e_shoff + (e.e_shstrndx * e.e_shentsize), SEEK_SET);
-      if (read(fd, &s, sizeof(s)) != sizeof(s)) {
-	close(fd);
-	return 0;
-      }
-
-      strs = (char *)malloc(s.sh_size);
-      lseek(fd, s.sh_offset, SEEK_SET);
-      if (read(fd, strs, s.sh_size) != s.sh_size) {
-	close(fd);
-	return 0;
-      }
-
-      for (i = 0; i < e.e_shnum; i++) {
-	lseek(fd, e.e_shoff + (i * e.e_shentsize), SEEK_SET);
-	if (read(fd, &s, sizeof(s)) != sizeof(s)) {
-	  close(fd);
-	  return 0;
-	}
-	if (!strcmp(strs + s.sh_name, ".rackcmdl")
-	    || !strcmp(strs + s.sh_name, ".rackprog")) {
-	  *_decl_end = (*_decl_end - *_start) + s.sh_offset;
-	  *_prog_end = (*_prog_end - *_start) + s.sh_offset;
-	  *_start = s.sh_offset;
-	  *_end = s.sh_offset + s.sh_size;
-	  close(fd);
-	  return !strcmp(strs + s.sh_name, ".rackprog");
-	}
-      }
-    }
+  if (start != 0) {
+    *_decl_end = (*_decl_end - *_start) + start;
+    *_prog_end = (*_prog_end - *_start) + start;
+    *_start = start;
+    *_end = end;
   }
 
-  close(fd);
-  return 0;
+  return is_prog;
 }
 
 int main(int argc, char **argv)
 {
-  char *me = argv[0], *data, **new_argv;
+  char *me = argv[0], *embedding_me, *data, **new_argv;
   char *exe_path, *lib_path, *dll_path;
   int start, decl_end, prog_end, end, count, fd, v, en, x11;
   int argpos, inpos, collcount = 1, fix_argv;
@@ -365,52 +254,7 @@ int main(int argc, char **argv)
     return 1;
   }
 
-  if (me[0] == '/') {
-    /* Absolute path */
-  } else if (has_slash(me)) {
-    /* Relative path with a directory: */
-    char *buf;
-    long buflen = 4096;
-    buf = (char *)malloc(buflen);
-    me = path_append(getcwd(buf, buflen), me);
-    free(buf);
-  } else {
-    /* We have to find the executable by searching PATH: */
-    char *path = copy_string(getenv("PATH")), *p, *m;
-    int more;
-
-    if (!path) {
-      path = "";
-    }
-
-    while (1) {
-      /* Try each element of path: */
-      for (p = path; *p && (*p != ':'); p++) { }
-      if (*p) {
-	*p = 0;
-	more = 1;
-      } else
-	more = 0;
-
-      if (!*path)
-	break;
-
-      m = path_append(path, me);
-
-      if (executable_exists(m)) {
-	if (m[0] != '/')
-	  m = path_append(getcwd(NULL, 0), m);
-	me = m;
-	break;
-      }
-      free(m);
-
-      if (more)
-	path = p + 1;
-      else
-	break;
-    }
-  }
+  me = lookup_exe_via_path(me);
   
   /* me is now an absolute path to the binary */
 
@@ -434,6 +278,11 @@ int main(int argc, char **argv)
     }
   }
 
+  /* use `me` for `-k`, unless we have a way to more directly get the
+     executable file that contains embedded code; if we do, then
+     argv[0] doesn't have to match the executable */
+  embedding_me = get_self_path(me);
+
   start = as_int(config + 8);
   decl_end = as_int(config + 12);
   prog_end = as_int(config + 16);
@@ -441,7 +290,7 @@ int main(int argc, char **argv)
   count = as_int(config + 24);
   x11 = as_int(config + 28);
 
-  fix_argv = try_elf_section(me, &start, &decl_end, &prog_end, &end);
+  try_section_shift(embedding_me, &start, &decl_end, &prog_end, &end);
 
   {
     int offset, len;
@@ -456,14 +305,14 @@ int main(int argc, char **argv)
   }
 
   data = (char *)malloc(end - prog_end);
-  new_argv = (char **)malloc((count + argc + (2 * collcount) + 10) * sizeof(char*));
+  new_argv = (char **)malloc((count + argc + (2 * collcount) + 15) * sizeof(char*));
 
-  fd = open(me, O_RDONLY, 0);
+  fd = open(embedding_me, O_RDONLY, 0);
   lseek(fd, prog_end, SEEK_SET);
   {
     int expected_length = end - prog_end;
     if (expected_length != read(fd, data, expected_length)) {
-      printf("read failed to read all %i bytes from file %s\n", expected_length, me);
+      printf("read failed to read all %i bytes from file %s at offset %d\n", expected_length, embedding_me, prog_end);
       abort();
     }
   }
@@ -495,7 +344,7 @@ int main(int argc, char **argv)
     putenv(dll_path);
   }
 
-  new_argv[0] = me;
+  new_argv[0] = exe_path;
 
   argpos = 1;
   inpos = 1;
@@ -520,6 +369,17 @@ int main(int argc, char **argv)
     }
   }
 
+  if (config[7] != '*') {
+    /* Add -E flag; we can't just put `me` in `argv[0]`, because some
+       OSes (well, just OpenBSD) cannot find the executable path of a
+       process, and the actual executable may be needed to find embedded
+       boot images. */
+    new_argv[argpos++] = "-E";
+    new_argv[argpos++] = me;
+  }
+  new_argv[argpos++] = "-N";
+  new_argv[argpos++] = me;
+
   /* Add -X and -S flags */
   {
     int offset, len;
@@ -540,11 +400,14 @@ int main(int argc, char **argv)
   new_argv[argpos++] = "-G";
   new_argv[argpos++] = absolutize(_configdir + _configdir_offset, me);
 
-  if (fix_argv) {
-    /* next three args are "-k" and numbers; fix 
-       the numbers to match start, decl_end, and prog_end */
-    fix_argv = argpos + 1;
-  }
+  if (count && !strcmp(data, "-k")) {
+    /* next four args are "-k" and numbers; leave room to insert the
+       filename in place of "-k", and fix the numbers to match start,
+       decl_end, and prog_end */
+    new_argv[argpos++] = "-Y";
+    fix_argv = argpos;
+  } else
+    fix_argv = 0;
 
   /* Add built-in flags: */
   while (count--) {
@@ -560,9 +423,10 @@ int main(int argc, char **argv)
   new_argv[argpos] = NULL;
 
   if (fix_argv) {
-    new_argv[fix_argv] = num_to_string(start);
-    new_argv[fix_argv+1] = num_to_string(decl_end);
-    new_argv[fix_argv+2] = num_to_string(prog_end);
+    new_argv[fix_argv] = embedding_me;
+    new_argv[fix_argv+1] = num_to_string(start);
+    new_argv[fix_argv+2] = num_to_string(decl_end);
+    new_argv[fix_argv+3] = num_to_string(prog_end);
   }
 
   /* Execute the original binary: */

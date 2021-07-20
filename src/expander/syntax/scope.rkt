@@ -108,13 +108,14 @@
        (ser-push! 'tag '#:scope-fill!)
        (ser-push! (binding-table-prune-to-reachable (scope-binding-table s) state))]))
   #:property prop:reach-scopes
-  (lambda (s reach)
+  (lambda (s extra-shifts reach)
     ;; the `bindings` field is handled via `prop:scope-with-bindings`
     (void))
   #:property prop:scope-with-bindings
-  (lambda (s get-reachable-scopes reach register-trigger)
+  (lambda (s get-reachable-scopes extra-shifts reach register-trigger)
     (binding-table-register-reachable (scope-binding-table s)
                                       get-reachable-scopes
+                                      extra-shifts
                                       reach
                                       register-trigger)))
 
@@ -167,6 +168,7 @@
                      shifted  ; box of table: interned shifted-multi-scopes for non-label phases
                      label-shifted) ; box of table: interned shifted-multi-scopes for label phases
   #:authentic
+  #:sealed
   #:property prop:serialize
   (lambda (ms ser-push! state)
     (ser-push! 'tag '#:multi-scope)
@@ -180,11 +182,11 @@
                      (hash-set! multi-scope-tables (multi-scope-scopes ms) ht)
                      ht))))
   #:property prop:reach-scopes
-  (lambda (s reach)
+  (lambda (s extra-shifts reach)
     ;; the `scopes` field is handled via `prop:scope-with-bindings`
     (void))
   #:property prop:scope-with-bindings
-  (lambda (ms get-reachable-scopes reach register-trigger)
+  (lambda (ms get-reachable-scopes bulk-shifts reach register-trigger)
     ;; This scope is reachable via its multi-scope, but it only
     ;; matters if it's reachable through a binding (otherwise it
     ;; can be re-generated later). We don't want to keep a scope
@@ -200,7 +202,7 @@
     ;; them differently, hence `prop:implicitly-reachable`.
     (for ([sc (in-hash-values (unbox (multi-scope-scopes ms)))])
       (unless (binding-table-empty? (scope-binding-table sc))
-        (reach sc)))))
+        (reach sc bulk-shifts)))))
 
 (define (deserialize-multi-scope name scopes)
   (multi-scope (new-deserialize-scope-id!) name (box scopes) (box (hasheqv)) (box (hash))))
@@ -230,9 +232,9 @@
     (ser-push! (binding-table-prune-to-reachable (scope-binding-table s) state))
     (ser-push! (representative-scope-owner s)))
   #:property prop:reach-scopes
-  (lambda (s reach)
+  (lambda (s bulk-shifts reach)
     ;; the inherited `bindings` field is handled via `prop:scope-with-bindings`
-    (reach (representative-scope-owner s)))
+    (reach (representative-scope-owner s) bulk-shifts))
   ;; Used by `binding-table-register-reachable`:
   #:property prop:implicitly-reachable #t)
 
@@ -247,6 +249,7 @@
 (struct shifted-multi-scope (phase        ; non-label phase shift or shifted-to-label-phase
                              multi-scope) ; a multi-scope
   #:authentic
+  #:sealed
   #:property prop:custom-write
   (lambda (sms port mode)
     (write-string "#<scope:" port)
@@ -260,8 +263,8 @@
     (ser-push! (shifted-multi-scope-phase sms))
     (ser-push! (shifted-multi-scope-multi-scope sms)))
   #:property prop:reach-scopes
-  (lambda (sms reach)
-    (reach (shifted-multi-scope-multi-scope sms))))
+  (lambda (sms bulk-shifts reach)
+    (reach (shifted-multi-scope-multi-scope sms) bulk-shifts)))
 
 (define (deserialize-shifted-multi-scope phase multi-scope)
   (intern-shifted-multi-scope phase multi-scope))
@@ -574,6 +577,7 @@
                      inspector  ; #f or inspector
                      tamper)    ; see "tamper.rkt"
   #:authentic
+  #:sealed
   #:property prop:propagation syntax-e
   #:property prop:propagation-tamper (lambda (p) (propagation-tamper p))
   #:property prop:propagation-set-tamper (lambda (p v) (propagation-set-tamper p v)))

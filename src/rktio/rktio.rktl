@@ -15,6 +15,7 @@
 (define-constant RKTIO_OPEN_NOT_DIR (<< 1 12))
 (define-constant RKTIO_OPEN_INIT (<< 1 13))
 (define-constant RKTIO_OPEN_OWN (<< 1 14))
+(define-constant RKTIO_DEFAULT_PERM_BITS 438)
 (define-constant RKTIO_STDIN 0)
 (define-constant RKTIO_STDOUT 1)
 (define-constant RKTIO_STDERR 2)
@@ -279,6 +280,15 @@
  rktio_open
  (((ref rktio_t) rktio) (rktio_const_string_t src) (int modes)))
 (define-function/errno
+ NULL
+ ()
+ (ref rktio_fd_t)
+ rktio_open_with_create_permissions
+ (((ref rktio_t) rktio)
+  (rktio_const_string_t src)
+  (int modes)
+  (int perm_bits)))
+(define-function/errno
  #f
  ()
  rktio_ok_t
@@ -355,6 +365,18 @@
   ((*ref char) buffer)
   (intptr_t start)
   (intptr_t end)))
+(define-function/errno
+ RKTIO_READ_ERROR
+ ()
+ intptr_t
+ rktio_read_converted_in
+ (((ref rktio_t) rktio)
+  ((ref rktio_fd_t) fd)
+  ((*ref char) buffer)
+  (intptr_t start)
+  (intptr_t len)
+  ((*ref char) is_converted)
+  (intptr_t converted_start)))
 (define-function
  ()
  intptr_t
@@ -1171,6 +1193,7 @@
  (ref char)
  rktio_expand_user_tilde
  (((ref rktio_t) rktio) (rktio_const_string_t filename)))
+(define-function () (ref char) rktio_uname (((ref rktio_t) rktio)))
 (define-function
  ()
  (ref rktio_signal_handle_t)
@@ -1194,8 +1217,14 @@
  rktio_install_os_signal_handler
  (((ref rktio_t) rktio)))
 (define-function () int rktio_poll_os_signal (((ref rktio_t) rktio)))
+(define-function () void rktio_will_modify_os_signal_handler ((int sig_id)))
 (define-function () uintptr_t rktio_get_milliseconds ())
 (define-function () double rktio_get_inexact_milliseconds ())
+(define-function
+ ()
+ double
+ rktio_get_inexact_monotonic_milliseconds
+ (((ref rktio_t) rktio)))
 (define-function
  ()
  uintptr_t
@@ -1222,7 +1251,7 @@
   (int get_gmt)))
 (define-function/errno
  #f
- ()
+ (msg-queue)
  rktio_ok_t
  rktio_shell_execute
  (((ref rktio_t) rktio)

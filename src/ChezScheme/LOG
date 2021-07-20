@@ -2118,3 +2118,95 @@
     x86.ss
 - add special case in cpnanopass.ss for (eq? (ftype-pointer-address x) 0)
     cpnanopass.ss
+- added missing #ifndef WIN32
+    gcwrapper.c
+- added initialization of __to_g to make gcc 7.5.0 happy
+    gc.c
+- updated Windows makefiles
+    c/Makefile.*nt
+- use lowercase for Windows include files
+    segment.c, windows.c
+- proper unicode handling when retrieving error messages from the OS
+  on Windows
+    windows.c
+- repair collector handling of an ephemerons that refers to a
+  younger object during incremental promotion
+    gc.c, 4.ms
+- added textual-output-port checks for record-writer write argument
+    print.ss,
+    record.ms, root-experr*
+- now using 64-bit arithmetic for seconds in S_condition_wait to
+  prevent a potential 2038 bug, at least on platforms where time_t
+  is 64 bits.  also now rounding rather than truncating nanoseconds
+  in the coversion to milliseconds on Windows.
+    thread.c
+- fixed a bug in arm32 that caused an error when generating
+  instructions with immediate operands where the immediate was larger
+  than 8 bits.
+    arm32.ss
+- fixed formatting in arm32.ss
+    arm32.ss
+- disabled unsupported mats for arm32le
+    foreign.ms, misc.ms
+- fixed callee-save floating point registers for arm32
+    arm32.ss, ftype.ss, np-languages.ss, primdata.ss
+- added a mat for the add-with-immediate bug
+    misc.ms,
+    mats/arm-immediate-1.ss (new), mats/arm-immediate-2.ss (new)
+- added a note about arm32 targets requiring a kernel module for the
+  time stamp counter
+    prims.ss
+
+9.5.4 changes:
+- updated version to 9.5.4
+    BUILDING NOTICE makefiles/Mf-install.in makefiles/Makefile-csug.in
+    scheme.1.in c/Makefile.a6nt c/Makefile.i3nt c/Makefile.ta6nt
+    c/Makefile.ti3nt mats/Mf-a6nt mats/Mf-i3nt mats/Mf-ta6nt
+    mats/Mf-ti3nt workarea c/scheme.rc s/7.ss s/cmacros.ss
+    release_notes/release_notes.stex csug/copyright.stex csug/csug.stex
+    bintar/Makefile rpm/Makefile pkg/Makefile wininstall/Makefile
+    wininstall/a6nt.wxs wininstall/i3nt.wxs wininstall/ta6nt.wxs
+    wininstall/ti3nt.wxs
+
+9.5.5 changes:
+- updated version to 9.5.5
+    BUILDING NOTICE makefiles/Mf-install.in scheme.1.in c/Makefile.a6nt
+    c/Makefile.i3nt c/Makefile.ta6nt c/Makefile.ti3nt mats/Mf-a6nt
+    mats/Mf-i3nt mats/Mf-ta6nt mats/Mf-ti3nt workarea c/scheme.rc
+    s/cmacros.ss release_notes/release_notes.stex csug/copyright.stex
+    csug/csug.stex bintar/Makefile rpm/Makefile pkg/Makefile
+    wininstall/Makefile wininstall/a6nt.wxs wininstall/i3nt.wxs
+    wininstall/ta6nt.wxs wininstall/ti3nt.wxs
+- newrelease no longer logs as updated files with no actual changes
+    newrelease
+- avoid hard-coded paths for utilities in build scripts
+    csug/gifs/Makefile csug/math/Makefile examples/Makefile
+    makefiles/Makefile-csug.in makefiles/Makefile-release_notes.in
+    makefiles/Mf-install.in makefiles/installsh mats/6.ms mats/Mf-a6fb
+    mats/Mf-a6le mats/Mf-a6nb mats/Mf-a6ob mats/Mf-a6osx mats/Mf-arm32le
+    mats/Mf-arm64le mats/Mf-arm64osx mats/Mf-i3fb mats/Mf-i3le mats/Mf-i3nb
+    mats/Mf-i3ob mats/Mf-i3osx mats/Mf-i3qnx mats/Mf-ppc32le mats/Mf-ppc32osx
+    mats/unix.ms newrelease pkg/Makefile release_notes/gifs/Makefile
+    release_notes/math/Makefile s/Mf-base stex/Makefile stex/Mf-stex
+    stex/gifs/Makefile stex/math/Makefile workarea
+    zlib/contrib/minizip/Makefile
+- fixed the documentation of load-shared-object to mention an up-to-date
+  dll for Windows
+    foreign.stex
+- New spellings #true and #false for #t and #f are recognized
+    read.ss 6.ms
+- refactor mats to allow different configurations to run in parallel.
+  The {partial,all,bully}x targets in Mats/Mf-base now support running
+  in parallel if make chooses to do so (e.g., if instructed via -j).
+  Update travis-ci build scripts to use new partialx target and run
+  jobs in parallel (based on the number of cores available).  Also
+  add the ability to "skip" (i.e., error before building) travis targets
+  by using a line (or lines) beginning with "travis:only:" and listing
+  the desired target machine type(s) in the commit message.
+    .travis.yml .travis/{build,test,maybe-skip-build}.sh
+    mats/{5_4,6,7,8,bytevector,examples,foreign}.ms
+    mats/{ftype,hash,io,misc,primvars,profile,record}.ms
+    mats/Mf-base mats/Mf-*nt mats/mat.ss mats/patch-interpret*
+- escape $(MAKE) to fix parallel mat issue observed with GNU Make 4.2.1:
+  "make[1]: warning: jobserver unavailable: using -j1."
+    mats/Mf-base

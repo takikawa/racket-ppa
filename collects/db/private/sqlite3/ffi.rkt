@@ -58,6 +58,9 @@
   (_fun _sqlite3_database
         -> _int))
 
+(define-sqlite sqlite3_busy_timeout
+  (_fun _sqlite3_database _int -> _int))
+
 ;; -- Stmt --
 
 (define (trim-and-copy-buffer buffer)
@@ -79,24 +82,26 @@
               (ptr-add sql-buffer (c-string-length sql-buffer))))
 
 (define-sqlite sqlite3_prepare
-  (_fun (db sql) ::
+  (_fun #:blocking? #t
+        (db sql) ::
         (db : _sqlite3_database)
         (sql-buffer : _gcpointer = (trim-and-copy-buffer sql))
         ((c-string-length sql-buffer) : _int)
-        (statement : (_ptr o _sqlite3_statement/null))
-        (tail : (_ptr o _pointer)) ;; points into sql-buffer (atomic-interior)
+        (statement : (_ptr o _sqlite3_statement/null atomic-interior))
+        (tail : (_ptr o _pointer atomic-interior)) ;; points into sql-buffer (atomic-interior)
         -> (result : _int)
         -> (values result statement (and tail
                                          (not (points-to-end? tail sql-buffer))))))
 
 (define-sqlite sqlite3_prepare_v2
-  (_fun (db sql) ::
+  (_fun #:blocking? #t
+        (db sql) ::
         (db : _sqlite3_database)
         (sql-buffer : _gcpointer = (trim-and-copy-buffer sql))
         ((c-string-length sql-buffer) : _int)
         ;; bad prepare statements set statement to NULL, with no error reported
-        (statement : (_ptr o _sqlite3_statement/null))
-        (tail : (_ptr o _pointer)) ;; points into sql-buffer (atomic-interior)
+        (statement : (_ptr o _sqlite3_statement/null atomic-interior))
+        (tail : (_ptr o _pointer atomic-interior)) ;; points into sql-buffer (atomic-interior)
         -> (result : _int)
         -> (values result statement (and tail
                                          (not (points-to-end? tail sql-buffer)))))
@@ -178,7 +183,8 @@
 ;; ----------------------------------------
 
 (define-sqlite sqlite3_step
-  (_fun _sqlite3_statement -> _int))
+  (_fun #:blocking? #t
+        _sqlite3_statement -> _int))
 
 (define-sqlite sqlite3_column_type
   (_fun _sqlite3_statement _int -> _int))
@@ -271,27 +277,39 @@
                                        (sqlite3_value_bytes v))]
                       [else (error '_sqlite3_value* "cannot convert: ~e (type = ~s)" v type)]))))
 
-(define-sqlite sqlite3_create_function_v2
-  (_fun _sqlite3_database
-        _string/utf-8
-        _int
-        (_int = (+ SQLITE_UTF8 SQLITE_DETERMINISTIC))
-        (_pointer = #f)
-        (_fun _sqlite3_context _int _pointer -> _void)
-        (_fpointer = #f)
-        (_fpointer = #f)
-        (_fpointer = #f)
-        -> _int))
+(define default-async-apply (lambda (p) (p)))
 
-(define-sqlite sqlite3_create_aggregate
-  (_fun _sqlite3_database
-        _string/utf-8
-        _int
-        (_int = (+ SQLITE_UTF8 SQLITE_DETERMINISTIC))
+(define-sqlite sqlite3_create_function_v2/scalar
+  (_fun (db name arity flags proc) ::
+        (db : _sqlite3_database)
+        (name : _string/utf-8)
+        (arity : _int)
+        (_int = (bitwise-ior SQLITE_UTF8
+                             (if (memq 'direct-only flags) SQLITE_DIRECTONLY 0)
+                             (if (memq 'deterministic flags) SQLITE_DETERMINISTIC 0)))
+        (_pointer = #f)
+        (proc : (_fun #:async-apply default-async-apply
+                      _sqlite3_context _int _pointer -> _void))
+        (_fpointer = #f)
+        (_fpointer = #f)
+        (_fpointer = #f)
+        -> _int)
+  #:c-id sqlite3_create_function_v2)
+
+(define-sqlite sqlite3_create_function_v2/aggregate
+  (_fun (db name arity flags step final) ::
+        (db : _sqlite3_database)
+        (name : _string/utf-8)
+        (arity : _int)
+        (_int = (bitwise-ior SQLITE_UTF8
+                             (if (memq 'direct-only flags) SQLITE_DIRECTONLY 0)
+                             (if (memq 'deterministic flags) SQLITE_DETERMINISTIC 0)))
         (_pointer = #f)
         (_fpointer = #f)
-        (_fun _sqlite3_context _int _pointer -> _void)
-        (_fun _sqlite3_context -> _void)
+        (step : (_fun #:async-apply default-async-apply
+                      _sqlite3_context _int _pointer -> _void))
+        (final : (_fun #:async-apply default-async-apply
+                       _sqlite3_context -> _void))
         (_fpointer = #f)
         -> _int)
   #:c-id sqlite3_create_function_v2)
@@ -328,20 +346,26 @@
 ;; state. The connection object is responsible for preventing the
 ;; closure from being prematurely collected.
 
+;; An aggbox is (box (U aggerror Any)); aggerror indicates that
+;; sqlite3_result_error has already been called to report an error.
+(define aggerror (gensym 'error))
+
 (define ((wrap-agg-step who proc aggbox agginit) ctx argc argp)
   (define args (get-args argc argp))
   (define aggctx (sqlite3_aggregate_context ctx 1))
   (when (zero? (ptr-ref aggctx _byte))
     (set-box! aggbox agginit)
     (ptr-set! aggctx _byte 1))
-  (set-box! aggbox (call/wrap who ctx (lambda () (apply proc (unbox aggbox) args))))
-  (sqlite3_result* ctx 0))
+  (unless (eq? (unbox aggbox) aggerror)
+    (set-box! aggbox (call/wrap who ctx (lambda () (apply proc (unbox aggbox) args))))))
 
 (define ((wrap-agg-final who proc aggbox agginit) ctx)
   (define aggctx (sqlite3_aggregate_context ctx 1))
-  (define r (call/wrap who ctx (lambda () (proc (unbox aggbox)))))
-  (set-box! aggbox agginit)
-  (sqlite3_result* ctx r))
+  (unless (eq? (unbox aggbox) aggerror)
+    (define r (call/wrap who ctx (lambda () (proc (unbox aggbox)))))
+    (set-box! aggbox #f)
+    (unless (eq? r aggerror)
+      (sqlite3_result* ctx r))))
 
 (define (call/wrap who ctx proc)
   (with-handlers
@@ -352,7 +376,8 @@
                   who
                   (cond [(exn? e) (exn-message e)]
                         [else (format "caught non-exception\n  caught: ~e" e)])))
-        (sqlite3_result_error ctx err))])
+        (sqlite3_result_error ctx err)
+        aggerror)])
     (call-with-continuation-barrier proc)))
 
 (define (get-args argc argp)

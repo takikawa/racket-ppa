@@ -112,7 +112,7 @@
                        ;; If the test did not use `rackunit`, claim
                        ;; success:
                        (if (zero? (cdr test-results))
-                           (cons 0 1)
+                           (cons 0 0)
                            test-results))))
 
 ;; Run each test in its own place or process, and collect both test
@@ -345,7 +345,19 @@
     (or (cond
          [(not try-config?) #f]
          [(module-declared? (add-submod p 'config) #t)
-          (dynamic-require (add-submod p 'config) '#%info-lookup)]
+          (define submod (add-submod p 'config))
+          (dynamic-require submod
+                           '#%info-lookup
+                           (lambda ()
+                             (error test-exe-name
+                                    (format
+                                     (string-append
+                                      "cannot extract information from a `config` submodule;\n"
+                                      " the submodule should use the `info` module language\n"
+                                      "  submodule: ~.s\n"
+                                      "  current directory: ~a")
+                                     (normalize-module-path submod)
+                                     (current-directory)))))]
          [else #f])
         (lambda (what get-default) (get-default))))
   (dynamic-require-elsewhere
@@ -1002,7 +1014,7 @@
   (set! packages? #t)]
  [("--modules" "-m")
   ("Interpret arguments as modules"
-   "  (ignore argument unless \".rkt\", \".scrbl\", or enabled by \"info.rkt\")")
+   "(ignore argument unless \".rkt\", \".scrbl\", or enabled by \"info.rkt\")")
   (set! check-top-suffix? #t)]
  #:once-each
  [("--drdr")

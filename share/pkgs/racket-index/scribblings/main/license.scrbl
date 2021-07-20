@@ -11,11 +11,11 @@ components distributed under other licenses. In short:
 
 @itemize[
 
- @item{The traditional Racket runtime system includes code distributed
-       under the GNU Lesser General Public License, version 3.}
-
- @item{The Racket on Chez Scheme runtime system embeds Chez Scheme, which
+ @item{The Racket CS Scheme runtime system embeds Chez Scheme, which
        is distributed under the Apache version 2.0 license.}
+
+ @item{The Racket BC runtime system includes code distributed
+       under the GNU Lesser General Public License, version 3.}
 
 ]
 
@@ -40,12 +40,6 @@ Racket software includes or extends the following copyrighted material:
 @copyright{
   libscheme
   Copyright (c) 1994 Brent Benson
-  All rights reserved.
-}
-
-@copyright{
-  Collector C++ extension by Jesse Hull and John Ellis
-  Copyright (c) 1994 Xerox Corporation
   All rights reserved.
 }
 

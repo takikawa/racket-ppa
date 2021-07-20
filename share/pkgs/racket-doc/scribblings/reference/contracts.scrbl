@@ -469,7 +469,7 @@ If the @racket[eager] argument is @racket[#t], then immutable vectors are
 checked eagerly when @racket[c] is a @tech{flat contract}. If the
 @racket[eager] argument is a number @racket[n], then immutable vectors are checked
 eagerly when @racket[c] is a @tech{flat contract} and the length of the vector
-is less than or equal to @racket[n].}
+is less than or equal to @racket[n].
 
 When a higher-order @racket[vectorof] contract is applied to a vector, the result
 is not @racket[eq?] to the input.  The result will be a copy for immutable vectors
@@ -480,7 +480,7 @@ in which case the result is the original vector.
 @history[#:changed "6.3.0.5" @list{Changed flat vector contracts to not copy
            immutable vectors.}
          #:changed "6.7.0.3" @list{Added the @racket[#:eager] option.}]
-
+}
 
 @defproc[(vector-immutableof [c contract?]) contract?]{
 
@@ -797,12 +797,21 @@ inspect the entire tree.
 @history[#:changed "6.0.1.6" @elem{Added @racket[#:inv].}]
 }
 
-@defproc[(parameter/c [in contract?] [out contract? in])
+@defproc[(parameter/c [in contract?]
+                      [out contract? in]
+                      [#:impersonator? impersonator? any/c #t])
          contract?]{
 
 Produces a contract on parameters whose values must match
 @racket[_out]. When the value in the contracted parameter
 is set, it must match @racket[_in].
+
+ If @racket[impersonator?] is a true value, then
+ @racket[parameter/c] always returns an @tech{impersonator
+ contract}. If it is @racket[#f], then the result will be a
+ @tech{chaperone contract} when both @racket[in] and
+ @racket[out] are @tech{chaperone contracts}, and an @tech{
+  impersonator contract} otherwise.
 
 @examples[#:eval (contract-eval) #:once
 (define/contract current-snack
@@ -1101,8 +1110,13 @@ directly as @tech{flat contracts}. It exists today for backwards compatibility.
 
 Extracts the predicate from a @tech{flat contract}.
 
-This function is a holdover from before @tech{flat contracts} could be used
-directly as predicates. It exists today for backwards compatibility.
+Note that most @tech{flat contracts} can be used directly as predicates, but not all.
+This function can be used to build predicates for ordinary Racket values that double
+as contracts, such as numbers and symbols. When building a @tech{contract combinator}
+that needs to explicitly convert ordinary racket values to flat contracts, consider
+using @racket[coerce-flat-contract] instead of @racket[flat-contract-predicate] so
+that the combinator can raise errors that use the combinator's name in the error
+message.
 }
 
 @defproc[(property/c [accessor (-> any/c any/c)]
@@ -2559,28 +2573,6 @@ contracts.  The error messages assume that the function named by
   the value cannot be coerced to a contract.
 }
 
-@defproc[(get/build-val-first-projection [c contract?])
-         (-> blame? (-> any/c (-> any/c any/c)))]{
-  Returns the @racket[_val-first] projection for @racket[c].
-              
-  See @racket[make-contract] for more details.
-  
-@history[#:added "6.1.1.5"]
-}
-
-@defproc[(get/build-late-neg-projection [c contract?])
-         (-> blame? (-> any/c any/c any/c))]{
- Returns the @racket[_late-neg] projection for @racket[c].
-              
- If @racket[c] does not have a @racket[_late-neg] contract,
- then this function uses the original projection for it
- and logs a warning to the @racket['racket/contract] logger.
- 
- See @racket[make-contract] for more details.
-  
- @history[#:added "6.2.900.11"]
-}
-
 @defparam[skip-projection-wrapper? wrap? boolean? #:value #f]{
  The functions @racket[make-chaperone-contract] and 
  @racket[build-chaperone-contract-property] wrap their
@@ -2791,6 +2783,12 @@ the other; both are provided for convenience and clarity.
   Produces a @racket[blame?] object just like @racket[b] except
              that it uses @racket[neg] instead of the negative
              position @racket[b] has.
+}
+
+@defproc[(blame-replaced-negative? [b blame?]) boolean?]{
+ Returns @racket[#t] if @racket[b] is the result of calling
+ @racket[blame-replace-negative] (or the result of some other function
+ whose input was the result of @racket[blame-replace-negative]).
 }
 
 @defproc[(blame-update [b blame?] [pos any/c] [neg any/c]) blame?]{
@@ -3650,8 +3648,27 @@ currently being checked.
   @history[#:added "6.3"]
 }
 
+@defproc[(get/build-val-first-projection [c contract?])
+         (-> blame? (-> any/c (-> any/c any/c)))]{
+  Returns the @racket[_val-first] projection for @racket[c].
 
+  See @racket[make-contract] for more details.
 
+  @history[#:added "6.1.1.5"]
+}
+
+@defproc[(get/build-late-neg-projection [c contract?])
+         (-> blame? (-> any/c any/c any/c))]{
+ Returns the @racket[_late-neg] projection for @racket[c].
+
+ If @racket[c] does not have a @racket[_late-neg] contract,
+ then this function uses the original projection for it
+ and logs a warning to the @racket['racket/contract] logger.
+
+ See @racket[make-contract] for more details.
+
+ @history[#:added "6.2.900.11"]
+}
 
 @section{@racketmodname[racket/contract/base]}
 

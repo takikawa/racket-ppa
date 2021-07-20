@@ -18,7 +18,7 @@
       (let dloop ([p (car args)] [v (cadr args)])
         (cond
          [(impersonator? p)
-          (dloop (impersonator-val p) (impersonate-apply/parameter p #f (list v)))]
+          (dloop (impersonator-val p) (impersonate-apply/parameter p p #f (list v)))]
          [(derived-parameter? p)
           (dloop (derived-parameter-next p) (|#%app| (parameter-guard p) v))]
          [else
@@ -101,7 +101,7 @@
           (let ([c (or (parameter-cell data)
                        default-c)])
             (thread-cell-set! c (if guard
-                                    (guard v)
+                                    (|#%app| guard v)
                                     v)))])
         3
         data))]))

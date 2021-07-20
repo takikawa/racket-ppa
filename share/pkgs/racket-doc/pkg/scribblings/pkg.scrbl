@@ -243,21 +243,23 @@ URLs is:
 @optional{@exec{.git}}@optional{@exec{/}}@optional{@exec{?path=}@nonterm{path}}@;
 @optional{@exec{#}@nonterm{rev}}}
 
-where @nonterm{scheme} is @litchar{git}, @litchar{http}, or
-@litchar{https}, except when @nonterm{scheme} is @litchar{git} and
+where @nonterm{scheme} is @litchar{git}, @litchar{http},
+@litchar{https}, @litchar{git+http}, or @litchar{git+https},
+except when @nonterm{scheme} is @litchar{git} and
 @nonterm{host} is @litchar{github.com} (which is treated more specifically as a GitHub
 reference). The @nonterm{path} can contain multiple
 @litchar{/}-separated elements to form a path within the repository,
 and it defaults to the empty path. The @nonterm{rev} can be a branch,
-tag, or commit, and it defaults to @exec{master}.
+tag, or commit, and it defaults to using the default branch as reported
+by the server.
 
 @margin-note{Due to properties of the Git protocol, the archive might
 be accessed more efficiently when @nonterm{rev} refers to a branch or
 tag (even if it is written as a commit). In those cases, the content
 typically can be obtained without downloading irrelevant history.}
 
-For example, @filepath{http://bitbucket.org/game/tic-tac-toe#master}
-is a Git package source. 
+For example, @filepath{http://bitbucket.org/game/tic-tac-toe#main}
+is a Git package source.
 
 A checkout of the repository at @nonterm{rev} provides the content of
 the package, and @nonterm{scheme} determines the protocol
@@ -270,11 +272,17 @@ A package source is inferred to be a Git reference when it starts with
 source is also inferred to be a Git reference when it starts with
 @litchar{http://} or @litchar{https://} and the last non-empty path
 element ends in @litchar{.git}; a @litchar{.git} suffix is added if
-the source is otherwise specified to be a Git reference. The inferred
-package name is the last element of @nonterm{path} if it is non-empty,
-otherwise the inferred name is @nonterm{repo}.
+the source is otherwise specified to be a Git reference. Finally, a
+package source is inferred to be a Git reference when it starts with
+@litchar{git+https://} or @litchar{git+http://}, in which case no
+@litchar{.git} suffix in the path is needed to designate the source as
+a Git reference (and no @litchar{.git} suffix is implicitly added).
+The inferred package name is the last element of @nonterm{path} if it
+is non-empty, otherwise the inferred name is @nonterm{repo}.
 
-@history[#:changed "6.1.1.1" @elem{Added Git repository support.}]}
+@history[#:changed "6.1.1.1" @elem{Added Git repository support.}
+         #:changed "8.0.0.13" @elem{Added @litchar{git+https://}
+                                    and @litchar{git+http://} support.}]}
 
 @; ----------------------------------------
 @item{a remote URL naming a GitHub repository --- The format for such
@@ -285,7 +293,7 @@ URLs is the same as for a Git repository reference starting
 @optional{@exec{.git}}@optional{@exec{/}}@optional{@exec{?path=}@nonterm{path}}@;
 @optional{@exec{#}@nonterm{rev}}}
 
-For example, @filepath{git://github.com/game/tic-tac-toe#master}
+For example, @filepath{git://github.com/game/tic-tac-toe#main}
 is a GitHub package source.
 
 @margin-note{A Github repository source that starts with
@@ -452,8 +460,10 @@ sub-commands.
  @itemlist[
 
  @item{@DFlag{type} @nonterm{type} or @Flag{t} @nonterm{type} --- Specifies an interpretation of the package source,
-       where @nonterm{type} is either @exec{file}, @exec{dir}, @exec{file-url}, @exec{dir-url}, @exec{git}, @exec{github}, 
-       or @exec{name}. The type is normally inferred for each @nonterm{pkg-source}.}
+       where @nonterm{type} is either @exec{file}, @exec{dir}, @exec{file-url}, @exec{dir-url}, @exec{git},
+       @exec{git-url}, @exec{github}, or @exec{name}. The difference between @exec{git} and @exec{git-url}
+       is that a @litchar{.git} suffix is added to a @litchar{http} or @litchar{https} URL for type @exec{git}, but
+       not for type @exec{git-url}. The type is normally inferred for each @nonterm{pkg-source}.}
 
  @item{@DFlag{name} @nonterm{pkg} or @Flag{n} @nonterm{pkg} --- Specifies the name of the package,
        which makes sense only when a single @nonterm{pkg-source} is provided. The name is normally
@@ -657,7 +667,8 @@ sub-commands.
          #:changed "6.4.0.14" @elem{Added the @DFlag{dry-run} flag.}
          #:changed "7.2.0.8" @elem{Added the @DFlag{recompile-only} flag.}
          #:changed "7.4.0.4" @elem{Added the @DFlag{no-docs}, @Flag{D} flags.}
-         #:changed "7.6.0.14" @elem{Allowed multiple @DFlag{catalog} flags.}]}
+         #:changed "7.6.0.14" @elem{Allowed multiple @DFlag{catalog} flags.}
+         #:changed "8.0.0.13" @elem{Added @litchar{git-url} as a @DFlag{type} option.}]}
 
 
 @subcommand{@command/toc{update} @nonterm{option} ... @nonterm{pkg-source} ... 
