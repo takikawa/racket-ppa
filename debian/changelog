@@ -1,3 +1,11 @@
+racket (7.9+dfsg1-2) unstable; urgency=medium
+
+  * Bug fix: "CVE-2021-32773", thanks to Moritz Mühlenhoff (Closes:
+    #991327). Backport commit aa2e814a02 from racket 8.2. See also
+    https://github.com/racket/racket/issues/3923
+
+ -- David Bremner <bremner@debian.org>  Sat, 24 Jul 2021 11:13:09 -0300
+
 racket (7.9+dfsg1-1) unstable; urgency=medium
 
   * New upstream release
