@@ -20,17 +20,16 @@ AC_ARG_ENABLE(compress,   [  --enable-compress       compress compiled code (ena
 AC_ARG_ENABLE(compressboot, [  --enable-compressboot   compress boot files])
 m4_include(../ac/path_arg.m4)
 AC_ARG_ENABLE(racket,     [  --enable-racket=<path>  use <path> as Racket to build; or "auto" to create])
-AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  Chez Scheme build directory at <path>])
-AC_ARG_ENABLE(mach,       [  --enable-mach=<mach>    Use Chez Scheme machine type <mach>])
-AC_ARG_ENABLE(target,     [  --enable-target=<mach>  Cross-build for Chez Scheme machine type <mach>])
+AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  obsolete])
+AC_ARG_ENABLE(mach,       [  --enable-mach=<mach>    use Chez Scheme machine type <mach>])
+AC_ARG_ENABLE(target,     [  --enable-target=<mach>  cross-build for Chez Scheme machine type <mach>])
 m4_include(../ac/natipkg_arg.m4)
 m4_include(../ac/sdk_arg.m4)
 m4_include(../ac/instlib_arg.m4)
 m4_include(../ac/strip_arg.m4)
 m4_include(../ac/ubsan_arg.m4)
-AC_ARG_ENABLE(csdefault,  [  --enable-csdefault      use CS as default build])
-AC_ARG_ENABLE(csonly,     [  --enable-csonly         build CS only])
-AC_ARG_ENABLE(parent,     [  --enable-parent         Create "../Makefile" (internal use)])
+m4_include(../ac/asan_arg.m4)
+m4_include(../ac/vm_arg.m4)
 m4_include(../ac/crossany_arg.m4)
 AC_ARG_ENABLE(libz,       [  --enable-libz           use installed libz if available])
 AC_ARG_ENABLE(liblz4,     [  --enable-liblz4         use installed liblz4 if available])
@@ -82,10 +81,7 @@ m4_include(../ac/natipkg_show.m4)
 show_explicitly_enabled "${enable_libz}" "Installed libz"
 show_explicitly_enabled "${enable_liblz4}" "Installed liblz4"
 
-if test "${enable_csonly}" = "yes" ; then
-  enable_csdefault=yes
-fi
-show_explicitly_enabled "${enable_csdefault}" "executables without suffix"
+m4_include(../ac/vm.m4)
 
 m4_include(../ac/instlib.m4)
 m4_include(../ac/sdk_show.m4)
@@ -105,17 +101,11 @@ m4_include(../ac/crossany.m4)
 
 SUB_CONFIGURE_EXTRAS=
 
-
-CS_INSTALLED=cs
 if test "${enable_csdefault}" = "yes" ; then
   CS_INSTALLED=""
-fi
-
-CS_COMPILED_SUBDIR=1
-COMP_SUBDIR_CONFIGURE_ARGS=
-if test "${enable_csdefault}" = "yes" ; then
-  CS_COMPILED_SUBDIR=0
-  COMP_SUBDIR_CONFIGURE_ARGS=--enable-csdefault
+else
+  CS_INSTALLED=cs
+  AC_DEFINE(CS_COMPILED_SUBDIR,1,[Use a subdirectory of "compiled"])
 fi
 
 ############## Install targets ################
@@ -145,6 +135,7 @@ FRAMEWORK_INSTALL_DIR='$(libpltdir)'
 FRAMEWORK_PREFIX='@executable_path/../lib/'
 
 RACKET='$(DEFAULT_RACKET)'
+BOOTFILE_RACKET='$(RACKET)'
 RUN_RACKET='$(RUN_THIS_RACKET)'
 SETUP_BOOT_MODE=--boot
 
@@ -204,14 +195,16 @@ case "$host_os" in
   *freebsd*)
     MACH_OS=fb
     CFLAGS="${CFLAGS} -I/usr/local/include"
-    LIBS="${LIBS} -L/usr/local/lib -liconv -lm -lpthread -lossp-uuid"
+    LDFLAGS="${LDFLAGS} -L/usr/local/lib"
+    LIBS="${LIBS} -liconv -lm -lpthread"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
     ;;
   openbsd*)
     MACH_OS=ob
     CFLAGS="${CFLAGS} -I/usr/local/include"
-    LIBS="${LIBS} -L/usr/local/lib -liconv -lm -lpthread -lossp-uuid"
+    LDFLAGS="${LDFLAGS} -L/usr/local/lib"
+    LIBS="${LIBS} -liconv -lm -lpthread"
     LDFLAGS="${LDFLAGS} -Wl,-zwxneeded"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
@@ -231,14 +224,9 @@ case "$host_os" in
     ;;
   linux*)
     MACH_OS=le
-    LIBS="${LIBS} -lrt -luuid"
+    LIBS="${LIBS} -lrt"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
-    AC_CHECK_HEADER(uuid/uuid.h, ok_uuid=yes, ok_uuid=no)
-    if test "${ok_uuid}" != "yes"; then
-      echo Could not find uuid/uuid.h, needed for Chez Scheme
-      exit 1
-    fi
     ;;
   osf1*)
     ;;
@@ -272,6 +260,9 @@ case "$host_os" in
     else
       CONFIGURE_RACKET_SO_COMPILE="env PLT_CS_MAKE_UNIX_STYLE_MACOS=y"
       CPPFLAGS="${CPPFLAGS} -DRACKET_XONX"
+      strip_needs_dash_s=yes
+    fi
+    if test "${enable_embedfw}" = "yes" ; then
       strip_needs_dash_s=yes
     fi
 
@@ -426,24 +417,30 @@ fi
 
 ############## Racket and Chez Scheme ################
 
-SCHEME_SRC=../../ChezScheme
-SCHEME_SRC_NOW="$SCHEME_SRC"
+case "$srcdir" in
+    /*)
+        upsrcdir=$srcdir
+        ;;
+    *)
+        upsrcdir=../$srcdir
+        ;;
+esac
+
+SCHEME_DIR=${srcdir}/../../ChezScheme
 MAKE_BUILD_SCHEME=checkout
 
 if test "${enable_scheme}" != "" ; then
-  SCHEME_SRC="${enable_scheme}"
-  SCHEME_SRC_NOW="$SCHEME_SRC"
-  MAKE_BUILD_SCHEME=none
-else
-  # Check for a directory packaged with a source distribution
-  if test -d "${srcdir}/../../ChezScheme" ; then
-    MAKE_BUILD_SCHEME=copy
-    SCHEME_SRC_NOW="${srcdir}/../../ChezScheme"
-  fi
+  echo Warning: --enable-scheme=... is obsolete and unsupported
 fi
 
 if test "${enable_racket}" != "" ; then
-  RACKET="${enable_racket}"
+  # In non-cross mode, we interpret `--enable-racket` to supply a
+  # Racket used only for generating Chez Scheme boot files
+  if test "${CROSS_MODE}" = "cross" ; then
+    RACKET="${enable_racket}"
+  else
+    BOOTFILE_RACKET="${enable_racket}"
+  fi
   SETUP_BOOT_MODE=--chain
 fi
 
@@ -473,6 +470,10 @@ fi
 ############## ubsan ################
 
 m4_include(../ac/ubsan.m4)
+
+############## ubsan ################
+
+m4_include(../ac/asan.m4)
 
 ############## Makefile includes ################
 
@@ -523,14 +524,14 @@ fi
 ############## zlib and LZ4 ################
 
 if test "${enable_libz}" != "no" ; then
-  if test ! -d "$SCHEME_SRC_NOW/zlib" ; then
+  if test ! -d "$SCHEME_DIR/zlib" ; then
     echo "No libz in Scheme directory, so trying installed"
     enable_libz=yes
   fi
 fi
 
 if test "${enable_liblz4}" != "no" ; then
-  if test ! -d "$SCHEME_SRC_NOW/lz4" ; then
+  if test ! -d "$SCHEME_DIR/lz4" ; then
     echo "No lz4 in Scheme directory, so trying installed"
     enable_liblz4=yes
   fi
@@ -595,6 +596,7 @@ CPPFLAGS="$CPPFLAGS $PREFLAGS"
 SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
 SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS}"'"'
 SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LIBS="'"'"${LIBS}"'"'
 SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR="'"'"${AR}"'"'
 SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} ARFLAGS="'"'"${ARFLAGS}"'"'
 SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} RANLIB="'"'"${RANLIB}"'"'
@@ -678,28 +680,12 @@ fi
 
 ############## final output ################
 
-# Pass certain configure args on to rktio
-keep_configure_args=
-fixup_prev=
-eval "set x $ac_configure_args"
-shift
-for fixup_arg
-do
-  case $fixup_arg in
-  # Strip away all feature choices
-  -enable* | --enable* | -disable* | --disable*)
-    ;;
-  *)
-    case $fixup_arg in
-    *\'*) fixup_arg=`echo "$fixup_arg" | sed "s/'/'\\\\\\\\''/g"` ;;
-    esac
-    keep_configure_args="$keep_configure_args '$fixup_arg'" ;;
-  esac
-done
+m4_include(../ac/rktio_keep.m4)
 
 SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
 SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
 
+AC_SUBST(upsrcdir)
 AC_SUBST(CC)
 AC_SUBST(CFLAGS)
 AC_SUBST(CPPFLAGS)
@@ -721,6 +707,7 @@ AC_SUBST(INCLUDEDEP)
 AC_SUBST(RKTL_PRE)
 AC_SUBST(RKTL_POST)
 AC_SUBST(RACKET)
+AC_SUBST(BOOTFILE_RACKET)
 AC_SUBST(SCHEME_DIR)
 AC_SUBST(MACH)
 AC_SUBST(TARGET_MACH)
@@ -743,7 +730,6 @@ AC_SUBST(CONFIGURE_RACKET_SO_COMPILE)
 AC_SUBST(COMPRESS_COMP)
 AC_SUBST(BOOT_COMPRESS_COMP)
 AC_SUBST(ELF_COMP)
-AC_SUBST(SCHEME_SRC)
 AC_SUBST(MAKE_BUILD_SCHEME)
 AC_SUBST(SCHEME_CONFIG_ARGS)
 AC_SUBST(SCHEME_CROSS_CONFIG_ARGS)

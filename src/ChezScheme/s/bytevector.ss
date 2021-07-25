@@ -1,4 +1,3 @@
-"bytevector.ss"
 ;;; bytevector.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;;
@@ -297,8 +296,8 @@
           [(kwd s/u bits)
            (with-syntax ([prim-name (construct-name #'kwd "bytevector-" #'s/u #'bits "-ref")]
                          [native-name (construct-name #'kwd "bytevector-" #'s/u #'bits "-native-ref")]
-                         [little-set! (construct-name #'kwd "little-ref-" #'s/u #'bits)]
-                         [big-set! (construct-name #'kwd "big-ref-" #'s/u #'bits)])
+                         [little-ref (construct-name #'kwd "little-ref-" #'s/u #'bits)]
+                         [big-ref (construct-name #'kwd "big-ref-" #'s/u #'bits)])
              #`(lambda (v i eness who)
                  (unless (bytevector? v) (not-a-bytevector who v))
                  (unaligned-ref-check who (fxquotient bits 8) v i)
@@ -496,8 +495,16 @@
   )
 
   (set! native-endianness
-    (lambda ()
-      (#2%native-endianness)))
+    (constant-case native-endianness
+      [(unknown)
+       (let ([endianness (if ((foreign-procedure "(cs)native_little_endian" () boolean))
+                             'little
+                             'big)])
+         (lambda ()
+           endianness))]
+      [else
+       (lambda ()
+         (#2%native-endianness))]))
 
   (set-who! make-bytevector
     (case-lambda
@@ -955,14 +962,16 @@
               (#3%bytevector-ieee-single-native-ref v i)
               (if (constant-case native-endianness
                     [(little) (eq? eness 'big)]
-                    [(big) (eq? eness 'little)])
+                    [(big) (eq? eness 'little)]
+                    [(unknown) (or (eq? eness 'big) (eq? eness 'little))])
                   (swap-ref v i)
                   (unrecognized-endianness who eness)))
           (if (eq? eness (native-endianness))
               (noswap-ref v i)
               (if (constant-case native-endianness
                     [(little) (eq? eness 'big)]
-                    [(big) (eq? eness 'little)])
+                    [(big) (eq? eness 'little)]
+                    [(unknown) (or (eq? eness 'big) (eq? eness 'little))])
                   (swap-ref v i)
                   (unrecognized-endianness who eness))))))
 
@@ -999,14 +1008,16 @@
               (#3%bytevector-ieee-double-native-ref v i)
               (if (constant-case native-endianness
                     [(little) (eq? eness 'big)]
-                    [(big) (eq? eness 'little)])
+                    [(big) (eq? eness 'little)]
+                    [(unknown) (or (eq? eness 'big) (eq? eness 'little))])
                   (swap-ref v i)
                   (unrecognized-endianness who eness)))
           (if (eq? eness (native-endianness))
               (noswap-ref v i)
               (if (constant-case native-endianness
                     [(little) (eq? eness 'big)]
-                    [(big) (eq? eness 'little)])
+                    [(big) (eq? eness 'little)]
+                    [(unknown) (or (eq? eness 'big) (eq? eness 'little))])
                   (swap-ref v i)
                   (unrecognized-endianness who eness))))))
 
@@ -1034,14 +1045,16 @@
                 (#3%bytevector-ieee-single-native-set! v i x)
                 (if (constant-case native-endianness
                       [(little) (eq? eness 'big)]
-                      [(big) (eq? eness 'little)])
+                      [(big) (eq? eness 'little)]
+                      [(unknown) (or (eq? eness 'big) (eq? eness 'little))])
                     (swap-set! v i x)
                     (unrecognized-endianness who eness)))
             (if (eq? eness (native-endianness))
                 (noswap-set! v i x)
                 (if (constant-case native-endianness
                       [(little) (eq? eness 'big)]
-                      [(big) (eq? eness 'little)])
+                      [(big) (eq? eness 'little)]
+                      [(unknown) (or (eq? eness 'big) (eq? eness 'little))])
                     (swap-set! v i x)
                     (unrecognized-endianness who eness)))))))
 
@@ -1077,14 +1090,16 @@
                 (#3%bytevector-ieee-double-native-set! v i x)
                 (if (constant-case native-endianness
                       [(little) (eq? eness 'big)]
-                      [(big) (eq? eness 'little)])
+                      [(big) (eq? eness 'little)]
+                      [(unknown) (or (eq? eness 'big) (eq? eness 'little))])
                     (swap-set! v i x)
                     (unrecognized-endianness who eness)))
             (if (eq? eness (native-endianness))
                 (noswap-set! v i x)
                 (if (constant-case native-endianness
                       [(little) (eq? eness 'big)]
-                      [(big) (eq? eness 'little)])
+                      [(big) (eq? eness 'little)]
+                      [(unknown) (or (eq? eness 'big) (eq? eness 'little))])
                     (swap-set! v i x)
                     (unrecognized-endianness who eness)))))))
 
@@ -1267,7 +1282,10 @@
               [else
                (constant-case native-endianness
                  [(little) (little->list v size)]
-                 [(big) (big->list v size)])])
+                 [(big) (big->list v size)]
+                 [(unknown) (if (eq? eness 'little)
+                                (little->list v size)
+                                (big->list v size))])])
             (constant-case native-endianness
               [(little)
                (if (eq? eness 'big)
@@ -1276,7 +1294,13 @@
               [(big)
                (if (eq? eness 'little)
                    (little->list v size)
-                   (unrecognized-endianness who eness))]))))
+                   (unrecognized-endianness who eness))]
+              [(unknown)
+               (if (eq? eness 'big)
+                   (big->list v size)
+                   (if (eq? eness 'little)
+                       (little->list v size)
+                       (unrecognized-endianness who eness)))]))))
 
     (set-who! bytevector->uint-list
       (lambda (v eness size)
@@ -1309,7 +1333,10 @@
               [else
                (constant-case native-endianness
                  [(little) (little->list v size)]
-                 [(big) (big->list v size)])])
+                 [(big) (big->list v size)]
+                 [(unknown) (if (eq? eness 'little)
+                                (little->list v size)
+                                (big->list v size))])])
             (constant-case native-endianness
               [(little)
                (if (eq? eness 'big)
@@ -1318,7 +1345,13 @@
               [(big)
                (if (eq? eness 'little)
                    (little->list v size)
-                   (unrecognized-endianness who eness))]))))
+                   (unrecognized-endianness who eness))]
+              [(unknown)
+               (if (eq? eness 'big)
+                   (big->list v size)
+                   (if (eq? eness 'little)
+                       (little->list v size)
+                       (unrecognized-endianness who eness)))]))))
   )
 
   (let ()
@@ -1398,7 +1431,10 @@
               [else
                (constant-case native-endianness
                  [(little) (list->little ls size)]
-                 [(big) (list->big ls size)])])
+                 [(big) (list->big ls size)]
+                 [(unknown) (if (eq? eness 'little)
+                                (list->little ls size)
+                                (list->big ls size))])])
             (constant-case native-endianness
               [(little)
                (if (eq? eness 'big)
@@ -1407,7 +1443,13 @@
               [(big)
                (if (eq? eness 'little)
                    (list->little ls size)
-                   (unrecognized-endianness who eness))]))))
+                   (unrecognized-endianness who eness))]
+              [(unknown)
+               (if (eq? eness 'big)
+                   (list->big ls size)
+                   (if (eq? eness 'little)
+                       (list->little ls size)
+                       (unrecognized-endianness who eness)))]))))
 
     (set-who! uint-list->bytevector
       (lambda (ls eness size)
@@ -1446,7 +1488,10 @@
               [else
                (constant-case native-endianness
                  [(little) (list->little ls size)]
-                 [(big) (list->big ls size)])])
+                 [(big) (list->big ls size)]
+                 [(unknown) (if (eq? eness 'little)
+                                (list->little ls size)
+                                (list->big ls size))])])
             (constant-case native-endianness
               [(little)
                (if (eq? eness 'big)
@@ -1455,7 +1500,13 @@
               [(big)
                (if (eq? eness 'little)
                    (list->little ls size)
-                   (unrecognized-endianness who eness))]))))
+                   (unrecognized-endianness who eness))]
+              [(unknown)
+               (if (eq? eness 'big)
+                   (list->big ls size)
+                   (if (eq? eness 'little)
+                       (list->little ls size)
+                       (unrecognized-endianness who eness)))]))))
   )
 
   (let ()
@@ -1464,62 +1515,59 @@
     ;; Always big-endian, so that compressed data is portable.
     (define uncompressed-length-endianness (endianness big))
 
-    (define $bytevector-compress-size
+    (define fp-bytevector-compress-size
       (foreign-procedure "(cs)bytevector_compress_size" (iptr int) uptr))
-    (define $bytevector-compress
+    (define fp-bytevector-compress
       (foreign-procedure "(cs)bytevector_compress" (scheme-object iptr iptr scheme-object iptr iptr int) scheme-object))
-    (define $bytevector-uncompress
+    (define fp-bytevector-uncompress
       (foreign-procedure "(cs)bytevector_uncompress" (scheme-object iptr iptr scheme-object iptr iptr int) scheme-object))
 
-    (set-who! bytevector-compress
-      (lambda (bv)
-        (unless (bytevector? bv) (not-a-bytevector who bv))
-        (let* ([fmt ($tc-field 'compress-format ($tc))]
-               [dest-max-len ($bytevector-compress-size (bytevector-length bv) fmt)]
-               [dest-alloc-len (min (+ dest-max-len uncompressed-length-length)
-                                    ;; In the unlikely event of a non-fixnum requested size...
-                                    (constant maximum-bytevector-length))]
+    (let ()
+      (define (compress who bv fmt offset)
+        (let* ([dest-max-len (fp-bytevector-compress-size (bytevector-length bv) fmt)]
+               [dest-alloc-len (min (+ dest-max-len offset) (constant maximum-bytevector-length))]
                [dest-bv (make-bytevector dest-alloc-len)])
-          (let ([r ($bytevector-compress dest-bv
-                                         uncompressed-length-length
-                                         (fx- dest-alloc-len uncompressed-length-length)
-                                         bv
-                                         0
-                                         (bytevector-length bv)
-                                         fmt)])
-            (cond
-             [(string? r)
-              ($oops who r bv)]
-             [else
-              (let ([tag (bitwise-ior
-                           (bitwise-arithmetic-shift-left (bytevector-length bv) (constant COMPRESS-FORMAT-BITS))
-                           fmt)])
-                ($bytevector-u64-set! dest-bv 0 tag uncompressed-length-endianness who)
-                (bytevector-truncate! dest-bv (fx+ r uncompressed-length-length)))])))))
+          (let ([r (fp-bytevector-compress dest-bv offset (fx- dest-alloc-len offset) bv 0 (bytevector-length bv) fmt)])
+            (if (string? r)
+                ($oops who r bv)
+                (bytevector-truncate! dest-bv (fx+ r offset))))))
 
-    (set-who! bytevector-uncompress
-      (lambda (bv)
-        (unless (bytevector? bv) (not-a-bytevector who bv))
-        (unless (>= (bytevector-length bv) uncompressed-length-length)
-          ($oops who "invalid data in source bytevector ~s" bv))
-        (let* ([tag ($bytevector-u64-ref bv 0 uncompressed-length-endianness who)]
-               [fmt (logand tag (fx- (fxsll 1 (constant COMPRESS-FORMAT-BITS)) 1))]
-               [dest-length (bitwise-arithmetic-shift-right tag (constant COMPRESS-FORMAT-BITS))])
-          (unless (and (fixnum? dest-length)
-                       ($fxu< dest-length (constant maximum-bytevector-length)))
-            ($oops who "bytevector ~s claims invalid uncompressed size ~s" bv dest-length))
-          (let* ([dest-bv (make-bytevector dest-length)]
-                 [r ($bytevector-uncompress dest-bv
-                                            0
-                                            dest-length
-                                            bv
-                                            uncompressed-length-length
-                                            (fx- (bytevector-length bv) uncompressed-length-length)
-                                            fmt)])
-            (cond
-             [(string? r) ($oops who r bv)]
-             [(fx= r dest-length) dest-bv]
-             [else
-              ($oops who "uncompressed size ~s for ~s is smaller than expected size ~a" r bv dest-length)]))))))
+      (set-who! $bytevector-compress
+        (lambda (bv fmt)
+          (compress who bv fmt 0)))
 
+      (set-who! bytevector-compress
+        (lambda (bv)
+          (unless (bytevector? bv) (not-a-bytevector who bv))
+          (let* ([fmt ($tc-field 'compress-format ($tc))]
+                 [dest-bv (compress who bv fmt uncompressed-length-length)])
+            (let ([tag (bitwise-ior
+                         (bitwise-arithmetic-shift-left (bytevector-length bv) (constant COMPRESS-FORMAT-BITS))
+                         fmt)])
+              ($bytevector-u64-set! dest-bv 0 tag uncompressed-length-endianness who)
+              dest-bv)))))
+
+    (let ()
+      (define (uncompress who bv dest-length fmt offset src-length)
+        (unless (and (fixnum? dest-length) ($fxu< dest-length (constant maximum-bytevector-length)))
+          ($oops who "bytevector ~s claims invalid uncompressed size ~s" bv dest-length))
+        (let ([dest-bv (make-bytevector dest-length)])
+          (let ([r (fp-bytevector-uncompress dest-bv 0 dest-length bv offset src-length fmt)])
+            (cond
+              [(string? r) ($oops who r bv)]
+              [(fx= r dest-length) dest-bv]
+              [else ($oops who "uncompressed size ~s for ~s is smaller than expected size ~s" r bv dest-length)]))))
+
+      (set-who! $bytevector-uncompress
+        (lambda (bv offset len dest-length fmt)
+          (uncompress who bv dest-length fmt offset len)))
+
+      (set-who! bytevector-uncompress
+        (lambda (bv)
+          (unless (bytevector? bv) (not-a-bytevector who bv))
+          (unless (>= (bytevector-length bv) uncompressed-length-length) ($oops who "invalid data in source bytevector ~s" bv))
+          (let* ([tag ($bytevector-u64-ref bv 0 uncompressed-length-endianness who)]
+                 [fmt (logand tag (fx- (fxsll 1 (constant COMPRESS-FORMAT-BITS)) 1))]
+                 [dest-length (bitwise-arithmetic-shift-right tag (constant COMPRESS-FORMAT-BITS))])
+            (uncompress who bv dest-length fmt uncompressed-length-length (fx- (bytevector-length bv) uncompressed-length-length)))))))
 )

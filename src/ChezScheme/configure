@@ -15,16 +15,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+srcdir=`dirname "$0"`
+
 machs=""; last=""; sep0=""; sep1=""; sep2=""; sep3=""; sep4=" and ";
+for fn in "$srcdir"/boot/*/scheme.boot ; do
+    next=`echo $fn | sed -e 's/.*\/boot\/\(.*\)\/scheme.boot/\1/'`
+    if [ "$next" != '*' ] ; then
+        machs=$machs$sep0$last
+        last=$next
+        sep0=$sep1; sep1=", "; sep2=$sep3; sep3=$sep4; sep4=", and "
+    fi
+done
 for fn in boot/*/scheme.boot ; do
-  machs=$machs$sep0$last
-  last=`echo $fn | sed -e 's/boot\/\(.*\)\/scheme.boot/\1/'`
-  sep0=$sep1; sep1=", "; sep2=$sep3; sep3=$sep4; sep4=", and "
+    next=`echo $fn | sed -e 's/boot\/\(.*\)\/scheme.boot/\1/'`
+    if [ "$next" != '*' ] ; then
+        machs=$machs$sep0$last
+        last=$next
+        sep0=$sep1; sep1=", "; sep2=$sep3; sep3=$sep4; sep4=", and "
+    fi
 done
 machs=$machs$sep2$last
 
 m=""
 w=""
+pb=no
 threads=yes
 nothreads=no
 temproot=""
@@ -186,6 +200,9 @@ while [ $# != 0 ] ; do
     --32)
       bits=32
       ;;
+    --pb)
+      pb=yes
+      ;;
     --installprefix=*)
       installprefix=`echo $1 | sed -e 's/^--installprefix=//'`
       ;;
@@ -307,6 +324,13 @@ while [ $# != 0 ] ; do
   shift
 done
 
+if [ "$m" = "pb" ] ; then
+    echo "Don't select pb using -m or --machine, because pb needs the"
+    echo " machine as the kernel host machine. Instead, use --pb to select"
+    echo " a pb (portable bytecode) build."
+    exit 1
+fi
+
 if [ "$bits" = "" ] ; then
   if uname -a | egrep 'amd64|x86_64|aarch64' > /dev/null 2>&1 ; then
     bits=64
@@ -320,11 +344,20 @@ if [ "$threads" = "" ] ; then
 fi
 
 if [ "$m" = "" ] ; then
-  if [ $bits = 64 ] ; then
-    if [ $threads = yes ] ; then m=$tm64 ; else m=$m64 ; fi
-  else
-    if [ $threads = yes ] ; then m=$tm32 ; else m=$m32 ; fi
+  machine_supplied=no
+  if [ $pb = yes ] ; then
+     m=pb
+     if [ $bits = 64 ] ; then mpbhost=$m64 ; else mpbhost=$m32 ; fi
+  else      
+    if [ $bits = 64 ] ; then
+      if [ $threads = yes ] ; then m=$tm64 ; else m=$m64 ; fi
+    else
+      if [ $threads = yes ] ; then m=$tm32 ; else m=$m32 ; fi
+    fi
   fi
+elif [ $pb = yes ] ; then
+  mpbhost=$m
+  m=pb
 fi
 
 if [ "$w" = "" ] ; then
@@ -412,58 +445,80 @@ if [ "$help" = "yes" ]; then
   exit 0
 fi
 
-if [ "$m" = "" -o ! -f boot/$m/scheme.boot ] ; then
-  echo "no suitable machine type found"
-  echo "try rerunning as $0 -m=<machine type>"
-  echo "available machine types: $machs"
+if [ "$m" != "" -o -f boot/$m/scheme.boot -o -f "$srcdir"/boot/$m/scheme.boot ] ; then
+  echo "Configuring for $m"
+else
+  if [ "$m" = "" ] ; then
+      maybem="<machine type>"
+  else
+      maybem=$m
+  fi
+  echo 'No suitable machine type found in "boot".'
+  echo ""
+  echo "Available machine types:"
+  echo "  $machs"
+  if [ "$machine_supplied" = "no" ] ; then
+      echo ""
+      if [ "$m" = "" ] ; then
+          echo "If the problem is that the machine type was not inferred,"
+          echo "you can try"
+      else
+          echo "If the problem is that the inferred machine type $m is"
+          echo "not correct, you can try"
+      fi
+      echo "  $0 -m=<machine type>"
+      echo "to specify one of the available machine types."
+  fi
+  echo ""
+  if [ "$m" = "" ] ; then
+      echo 'If no directory in "boot" exists for the correct machine type,'
+      echo "then you can use Racket v7.1 or later with"
+  else
+      echo "Since no directory in "'"boot"'" exists for $m, you can try"
+      echo "using Racket v7.1 or later with"
+  fi
+  echo "  racket rktboot/main.rkt --machine $maybem"
+  echo "to create the boot files, and then try $0 again."
+  if [ -f boot/pb/scheme.boot ] ; then
+      echo ""
+      echo "Alternatively, a pb machine type is available, so try"
+      echo "  $0 --pb"
+      echo "  make $maybem.bootquick"
+      echo "to create the boot files using a portable-bytecode build,"
+      echo "and then try $0 again."
+  fi
   exit 1
 fi
 
-if [ -d '.git' ] && command -v git >/dev/null 2>&1 ; then
-  git submodule init && git submodule update || exit 1
-else
-  if [ ! -f 'nanopass/nanopass.ss' ] ; then
-    rmdir nanopass > /dev/null 2>&1
-    (curl  -L -o v1.9.tar.gz https://github.com/nanopass/nanopass-framework-scheme/archive/v1.9.tar.gz && tar -zxf v1.9.tar.gz && mv nanopass-framework-scheme-1.9 nanopass && rm v1.9.tar.gz) || exit 1
-  fi
+case "$srcdir" in
+    /*)
+        upsrcdir=$srcdir
+        ;;
+    *)
+        upsrcdir=../$srcdir
+        ;;
+esac
 
-  if [ "${zlibDep}" != "" ] ; then
-    if [ ! -f 'zlib/configure' ] ; then
-      rmdir zlib > /dev/null 2>&1
-      (curl -L -o v1.2.11.tar.gz https://github.com/madler/zlib/archive/v1.2.11.tar.gz && tar -xzf v1.2.11.tar.gz && mv zlib-1.2.11 zlib && rm v1.2.11.tar.gz) || exit 1
-    fi
-  fi
-  
-  if [ "${LZ4Dep}" != "" ] ; then
-    if [ ! -f 'lz4/lib/Makefile' ] ; then
-      rmdir lz4 > /dev/null 2>&1
-      (curl -L -o v1.8.3.tar.gz https://github.com/lz4/lz4/archive/v1.8.3.tar.gz && tar -xzf v1.8.3.tar.gz && mv lz4-1.8.3 lz4 && rm v1.8.3.tar.gz) || exit 1
-    fi
-  fi
-
-  if [ ! -f 'stex/Mf-stex' ] ; then
-    rmdir stex > /dev/null 2>&1
-    (curl -L -o v1.2.1.tar.gz https://github.com/dybvig/stex/archive/v1.2.1.tar.gz && tar -zxf v1.2.1.tar.gz && mv stex-1.2.1 stex && rm v1.2.1.tar.gz) || exit 1
-  fi
-fi
-
-./workarea $m $w
+"$srcdir"/workarea $m $w $mpbhost
 
 sed -e 's/$(m)/'$m'/g'\
     -e 's/$(workarea)/'$w'/g'\
-  makefiles/Makefile.in > Makefile
+  "$srcdir"/makefiles/Makefile.in > Makefile
 
+mkdir -p csug
 sed -e 's/$(m)/'$m'/g'\
-    makefiles//Makefile-csug.in > csug/Makefile
+    -e "s;^srcdir = .*\$;srcdir = $upsrcdir/csug;"\
+    "$srcdir"/makefiles//Makefile-csug.in > csug/Makefile
 
+mkdir -p release_notes
 sed -e 's/$(m)/'$m'/g'\
-    makefiles//Makefile-release_notes.in > release_notes/Makefile
+    "$srcdir"/makefiles//Makefile-release_notes.in > release_notes/Makefile
 
-cat makefiles/Makefile-workarea.in > $w/Makefile
+cat "$srcdir"/makefiles/Makefile-workarea.in > $w/Makefile
 
 sed -e 's/$(m)/'$m'/g'\
     -e 's/$(workarea)/'$w'/g'\
-    makefiles/Mf-boot.in > $w/Mf-boot
+    "$srcdir"/makefiles/Mf-boot.in > $w/Mf-boot
 
 sed -e "s;^m=none\$;m=$m;"\
     -e "s;^InstallBin=.*\$;InstallBin=$installbin;"\
@@ -479,9 +534,9 @@ sed -e "s;^m=none\$;m=$m;"\
     -e "s;^InstallKernelTarget=.*$;InstallKernelTarget=$installkerneltarget;"\
     -e "s;^InstallZlibTarget=.*$;InstallZlibTarget=$installzlibtarget;"\
     -e "s;^InstallLZ4Target=.*$;InstallLZ4Target=$installlz4target;"\
-    makefiles/Mf-install.in > $w/Mf-install
+    "$srcdir"/makefiles/Mf-install.in > $w/Mf-install
 
-cat > $w/c/config.h << END
+cat > $w/c/next_config.h << END
 #define SCHEME_SCRIPT "$installscriptname"
 #ifndef WIN32
 #define DEFAULT_HEAP_PATH "$installlib/csv%v/%m"
@@ -489,19 +544,40 @@ cat > $w/c/config.h << END
 END
 
 if [ "$disablex11" = "yes" ]; then
-  echo '#define DISABLE_X11' >> $w/c/config.h
+  echo '#define DISABLE_X11' >> $w/c/next_config.h
 fi
 
 cursesLib=-lcurses
 ncursesLib=-lncurses
 
 if [ "$disablecurses" = "yes" ]; then
-  echo '#define DISABLE_CURSES' >> $w/c/config.h
+  echo '#define DISABLE_CURSES' >> $w/c/next_config.h
   cursesLib=
   ncursesLib=
 fi
 
+if [ ! -f "$w/c/config.h" ] ; then
+   mv $w/c/next_config.h $w/c/config.h
+elif `cmp -s $w/c/next_config.h $w/c/config.h` ; then
+   rm $w/c/next_config.h
+else
+   mv $w/c/next_config.h $w/c/config.h
+fi
+
+warningFlags="-Wpointer-arith -Wall -Wextra -Werror -Wno-implicit-fallthrough"
+optFlags=-O2
+
+case "$srcdir" in
+    /*)
+        upupsrcdir=$srcdir
+        ;;
+    *)
+        upupsrcdir=../../$srcdir
+        ;;
+esac
+
 cat > $w/c/Mf-config << END
+upupsrcdir=$upupsrcdir
 CC=$CC
 CPPFLAGS=$CPPFLAGS
 CFLAGS=$CFLAGS
@@ -521,6 +597,9 @@ zlibLib=$zlibLib
 LZ4Lib=$LZ4Lib
 zlibHeaderDep=$zlibHeaderDep
 LZ4HeaderDep=$LZ4HeaderDep
+warningFlags=$warningFlags
+optFlags=$optFlags
+KernelCFlags=$KernelCFlags
 Kernel=\${${Kernel}}
 KernelLinkDeps=\${${Kernel}LinkDeps}
 KernelLinkLibs=\${${Kernel}LinkLibs}

@@ -159,8 +159,12 @@
         (begin (set! cur (func str)) (complete #f 1))
         (and (pair? cur)
              (let* ([cur (begin0 (car cur) (set! cur (cdr cur)))]
-                    [cur (if (string? cur) (string->bytes/utf-8 cur) cur)])
-               (malloc (add1 (bytes-length cur)) cur 'raw)))))
+                    [cur (if (string? cur) (string->bytes/utf-8 cur) cur)]
+                    [len (bytes-length cur)]
+                    [p (malloc (add1 len) 'raw)])
+                 (memcpy p cur len)
+                 (ptr-set! p _byte len 0)
+                 p))))
     complete))
 
 (define (set-completion-append-character! c)
@@ -194,9 +198,23 @@
 ;; to avoid buffering issues between C and Racket, and to allow
 ;; racket threads to run while waiting for input.
 (set-ffi-obj! "rl_getc_function" libreadline (_fun #:keep keep-alive! _pointer -> _int)
-              (lambda (_)
-                (define next-byte (read-byte real-input-port))
-                (if (eof-object? next-byte) -1 next-byte)))
+              ;; How does rl_getc_function return Unicode characters?
+              ;; On readline, returns one byte of UTF-8 encoding per call.
+              ;; On libedit w/ "widec" support, returns one whole wchar_t per call.
+              ;; - option (--enable-widec) since version "0:35:0" (2010-04-24)
+              ;; - always enabled since version "0:54:0" (2016-06-18)
+              ;; - no known dynamic test to tell whether enabled, so just assume yes
+              (cond
+                [(get-ffi-obj "el_wgets" libreadline _fpointer (lambda () #f))
+                 ;; libedit (has el_wgets since 2009-12-30)
+                 (lambda (_)
+                   (define next-char (read-char real-input-port))
+                   (if (eof-object? next-char) -1 (char->integer next-char)))]
+                [else
+                 ;; libreadline
+                 (lambda (_)
+                   (define next-byte (read-byte real-input-port))
+                   (if (eof-object? next-byte) -1 next-byte))]))
 
 
 ;; force cursor on a new line

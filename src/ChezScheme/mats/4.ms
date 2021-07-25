@@ -4805,6 +4805,48 @@
                  (eq? #!bwp (ephemeron-value e)))))))))
 
    ;; ----------------------------------------
+   ;; Check interaction of mutation and incremental generation promotion
+
+   (with-interrupts-disabled
+    (let ([key "key"])
+      (let ([e (ephemeron-cons key #f)])
+        (collect 0 1 1)
+        (let ([key2 (gensym key)])
+          ;; e is gen 1, key2 is gen 0:
+          (set-car! e key2)
+          (collect 1 1 2)
+          ;; Now, e is gen 1, key2 is gen 0
+          (and (eq? (car e) key2)
+               (begin
+                 (collect 1 2 2)
+                 ;; Check that the GC update the reference to `key2` in `e`:
+                 (eq? (car e) key2)))))))
+
+   ;; ----------------------------------------
+   ;; Check GC interaction with zero-sized contnuations - unlikely
+   ;; to crash even if things are wrong, but it's worth a try
+
+   (let ()
+     (define (loop i)
+       (if (zero? i)
+           (call/cc (lambda (k) (k '())))
+           (let ([keeps (loop (sub1 i))])
+             (call/cc
+              (lambda (k)
+                (cons k keeps))))))
+
+     (with-interrupts-disabled
+      (collect 0)
+      (let ([keeps (filter (lambda (c)
+                             (eqv? 0 (#%$continuation-stack-clength c)))
+                           (loop 1000))])
+        ;; The `keeps` list is probably non-empty
+        (collect 0 0)
+        (collect 0 0)
+        (keep-live keeps)
+        #t)))
+
+   ;; ----------------------------------------
    ;; Check fasl:
    (let ([s (gensym)])
      (define-values (o get) (open-bytevector-output-port))

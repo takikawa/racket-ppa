@@ -234,7 +234,8 @@
           [(_ rhs)
            (lambda (stx)
              (syntax-rearm stx #'rhs))]))
-      (let eloop ([use-transformer? #t])
+      ;; expanded-rhs :: (or/c #f syntax?)
+      (let eloop ([use-transformer? #t] [expanded-rhs #f])
         (define unpacked-clause (unpack clause))
         (syntax-case unpacked-clause (values in-parallel stop-before stop-after :do-in)
           [[(id ...) rhs]
@@ -258,7 +259,7 @@
                                         (cons (syntax-local-introduce #'form)
                                               (or (syntax-property r 'disappeared-use)
                                                   null))))
-                     (eloop #f)))))]
+                     (eloop #f #f)))))]
           [[(id ...) (:do-in . body)]
            (syntax-case #'body ()
              [(([(outer-id ...) outer-rhs] ...)
@@ -333,7 +334,7 @@
                 (and post-guard (not (pred id ...)))
                 (loop-arg ...)))]
           [[(id ...) rhs]
-           #t
+           expanded-rhs
            (let ([introducer (make-syntax-introducer)])
              ;; log non-specialized clauses, for performance tuning
              (when (log-level? sequence-specialization-logger 'debug)
@@ -344,14 +345,15 @@
                                     (syntax-line   #'rhs)
                                     (syntax-column #'rhs))
                             #'rhs))
-             (with-syntax ([[(id ...) rhs] (introducer (syntax-local-introduce clause))])
+             (with-syntax ([[(id ...) rhs*]
+                            (introducer (syntax-local-introduce #`[(id ...) #,expanded-rhs]))])
                (with-syntax ([(post-id ...) (generate-temporaries #'(id ...))])
                  (arm-for-clause
                   (syntax-local-introduce
                    (introducer
                     #`(([(pos->vals pos-pre-inc pos-next init pos-cont? val-cont? all-cont?)
                          #,(syntax-property
-                            (syntax/loc #'rhs (make-sequence '(id ...) rhs))
+                            (syntax/loc #'rhs (make-sequence '(id ...) rhs*))
                             'feature-profile:generic-sequence #t)])
                        (void)
                        ([pos init])
@@ -382,6 +384,43 @@
                           (syntax/loc #'rhs ((pos-next pos)))
                           'feature-profile:generic-sequence #t))))
                   (make-rearm)))))]
+          [[(id ...) rhs]
+           (not (syntax-property #'rhs 'for:no-implicit-optimization))
+           (with-syntax ([expanded-rhs (syntax-disarm (local-expand #'rhs 'expression (list #'quote)) orig-insp)])
+             (syntax-case #'expanded-rhs (quote)
+               [(quote e)
+                (let ([content (syntax-e #'e)])
+                  (cond
+                    [(exact-nonnegative-integer? content)
+                     (expand-clause orig-stx (arm-for-clause
+                                              #'[(id ...) (*in-range e)]
+                                              (make-rearm)))]
+                    [(list? content)
+                     (expand-clause orig-stx (arm-for-clause
+                                              ;; list is the only case we need to specifically quote it
+                                              ;; because it would turn into a function application otherwise
+                                              #'[(id ...) (*in-list expanded-rhs)]
+                                              (make-rearm)))]
+                    [(vector? content)
+                     (expand-clause orig-stx (arm-for-clause
+                                              #'[(id ...) (*in-vector e)]
+                                              (make-rearm)))]
+                    [(and (hash? content) (immutable? content))
+                     (expand-clause orig-stx (arm-for-clause
+                                              #'[(id ...) (in-immutable-hash e)]
+                                              (make-rearm)))]
+                    [(string? content)
+                     (expand-clause orig-stx (arm-for-clause
+                                              #'[(id ...) (*in-string e)]
+                                              (make-rearm)))]
+                    [(bytes? content)
+                     (expand-clause orig-stx (arm-for-clause
+                                              #'[(id ...) (*in-bytes e)]
+                                              (make-rearm)))]
+                    [else (eloop #f #'expanded-rhs)]))]
+               [_ (eloop #f #'expanded-rhs)]))]
+          ;; when for:no-implicit-optimization is true
+          [[(id ...) rhs] (eloop #f #'rhs)]
           [_
            (raise-syntax-error #f
                                "bad sequence binding clause" orig-stx clause)]))))
@@ -1489,6 +1528,10 @@
 
   (define-syntax (for/foldX/derived stx)
     (syntax-case stx ()
+      ;; Force expression context
+      [_
+       (not (eq? 'expression (syntax-local-context)))
+       #`(#%expression #,stx)]
       ;; Done case (no more clauses, and no generated clauses to emit):
       [(_ [orig-stx inner-recur nested? emit? ()] ([fold-var fold-init] ...) next-k break-k final?-id ()
           expr1 expr ...)
@@ -1953,12 +1996,12 @@
                   ids)
         (with-syntax ([(id2 ...) (generate-temporaries ids)]
                       [for/fold for/fold-id]
-                      [orig-stx stx])
+                      [orig-stx stx]
+                      [((middle-body ...) (body ...)) (split-for-body stx #'(expr1 expr ...))])
           #'(let-values ([(id ...)
                           (for/fold orig-stx ([id null] ...) bindings
-                            (let-values ([(id2 ...) (let ()
-                                                      expr1
-                                                      expr ...)])
+                            middle-body ...
+                            (let-values ([(id2 ...) (let () body ...)])
                               (values* (cons id2 id) ...)))])
               (values* (alt-reverse id) ...)))))
     (syntax-case stx ()
@@ -2335,7 +2378,7 @@
     (if orig-dir
 	(dir-list (path->complete-path orig-dir init-dir)
 		  orig-dir null)
-	(directory-list init-dir)))
+	(sort (directory-list init-dir) path<?)))
 
   (define in-directory
     (case-lambda 
@@ -2377,7 +2420,7 @@
 	      ([(d) (car l)])
 	      #true
 	      #true
-	      [(next-body l d init-dir use-dir?)])]]
+	      [(next-body l (car l) init-dir use-dir?)])]]
 	 [_ #f])))
 
   )

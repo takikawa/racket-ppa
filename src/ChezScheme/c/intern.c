@@ -38,22 +38,23 @@ void S_intern_init() {
 }
 
 static void oblist_insert(ptr sym, iptr idx, IGEN g) {
+  ptr tc = get_thread_context();
   bucket *b, *oldb, **pb;
 
-  find_room(g == 0 ? space_new : space_data, g, typemod, sizeof(bucket), b);
+  find_room_voidp(tc, g == 0 ? space_new : space_data, g, ptr_align(sizeof(bucket)), b);
   b->sym = sym;
   if (g == 0) {
     b->next = S_G.oblist[idx];
     S_G.oblist[idx] = b;
   } else {
-    for (pb = &S_G.oblist[idx]; (oldb = *pb) != NULL && SegmentGeneration(addr_get_segment(oldb)) < g; pb = &oldb->next);
+    for (pb = &S_G.oblist[idx]; (oldb = *pb) != NULL && SegmentGeneration(addr_get_segment(TO_PTR(oldb))) < g; pb = &oldb->next);
     b->next = oldb;
     *pb = b;
   }
 
   if (g != static_generation) {
     bucket_list *bl;
-    find_room(g == 0 ? space_new : space_data, g, typemod, sizeof(bucket_list), bl);
+    find_room_voidp(tc, g == 0 ? space_new : space_data, g, ptr_align(sizeof(bucket_list)), bl);
     bl->car = b;
     bl->cdr = S_G.buckets_of_generation[g];
     S_G.buckets_of_generation[g] = bl;
@@ -85,7 +86,7 @@ void S_resize_oblist(void) {
       idx = OBINDEX(UNFIX(SYMHASH(sym)), new_oblist_length);
       g = GENERATION(sym);
 
-      for (pb = &new_oblist[idx]; (oldb = *pb) != NULL && SegmentGeneration(addr_get_segment(oldb)) < g; pb = &oldb->next) {
+      for (pb = &new_oblist[idx]; (oldb = *pb) != NULL && SegmentGeneration(addr_get_segment(TO_PTR(oldb))) < g; pb = &oldb->next) {
         inc++;
         if (done)
           dinc++;
@@ -152,10 +153,10 @@ ptr S_intern(const unsigned char *s) {
   iptr n = strlen((const char *)s);
   iptr hc = hash(s, n);
   iptr idx = OBINDEX(hc, S_G.oblist_length);
-  ptr sym;
+  ptr sym, str;
   bucket *b;
 
-  tc_mutex_acquire()
+  tc_mutex_acquire();
 
   b = S_G.oblist[idx];
   while (b != NULL) {
@@ -166,7 +167,7 @@ ptr S_intern(const unsigned char *s) {
           iptr i;
           for (i = 0; ; i += 1) {
             if (i == n) {
-               tc_mutex_release()
+               tc_mutex_release();
                return sym;
             }
             if (Sstring_ref(str, i) != s[i]) break;
@@ -176,11 +177,14 @@ ptr S_intern(const unsigned char *s) {
     b = b->next;
   }
 
-  sym = S_symbol(S_string((const char *)s, n));
+  str = S_string((const char *)s, n);
+  STRTYPE(str) |= string_immutable_flag;
+
+  sym = S_symbol(str);
   INITSYMHASH(sym) = FIX(hc);
   oblist_insert(sym, idx, 0);
 
-  tc_mutex_release()
+  tc_mutex_release();
   return sym;
 }
 
@@ -191,7 +195,7 @@ ptr S_intern_sc(const string_char *name, iptr n, ptr name_str) {
   ptr sym;
   bucket *b;
 
-  tc_mutex_acquire()
+  tc_mutex_acquire();
 
   b = S_G.oblist[idx];
   while (b != NULL) {
@@ -202,7 +206,7 @@ ptr S_intern_sc(const string_char *name, iptr n, ptr name_str) {
           iptr i;
           for (i = 0; ; i += 1) {
             if (i == n) {
-               tc_mutex_release()
+               tc_mutex_release();
                return sym;
             }
             if (STRIT(str, i) != name[i]) break;
@@ -218,7 +222,7 @@ ptr S_intern_sc(const string_char *name, iptr n, ptr name_str) {
   INITSYMHASH(sym) = FIX(hc);
   oblist_insert(sym, idx, 0);
 
-  tc_mutex_release()
+  tc_mutex_release();
   return sym;
 }
 
@@ -228,7 +232,7 @@ ptr S_intern3(const string_char *pname, iptr plen, const string_char *uname, ipt
   ptr sym;
   bucket *b;
 
-  tc_mutex_acquire()
+  tc_mutex_acquire();
 
   b = S_G.oblist[idx];
   while (b != NULL) {
@@ -239,7 +243,7 @@ ptr S_intern3(const string_char *pname, iptr plen, const string_char *uname, ipt
           iptr i;
           for (i = 0; ; i += 1) {
             if (i == ulen) {
-               tc_mutex_release()
+               tc_mutex_release();
                return sym;
             }
             if (STRIT(str, i) != uname[i]) break;
@@ -257,7 +261,7 @@ ptr S_intern3(const string_char *pname, iptr plen, const string_char *uname, ipt
   INITSYMHASH(sym) = FIX(hc);
   oblist_insert(sym, idx, 0);
 
-  tc_mutex_release()
+  tc_mutex_release();
   return sym;
 }
 
@@ -269,7 +273,7 @@ void S_intern_gensym(sym) ptr sym; {
   iptr idx = OBINDEX(hc, S_G.oblist_length);
   bucket *b;
 
-  tc_mutex_acquire()
+  tc_mutex_acquire();
 
   b = S_G.oblist[idx];
   while (b != NULL) {
@@ -280,7 +284,7 @@ void S_intern_gensym(sym) ptr sym; {
           iptr i;
           for (i = 0; ; i += 1) {
             if (i == ulen) {
-               tc_mutex_release()
+               tc_mutex_release();
                S_error1("intern-gensym", "unique name ~s already interned", uname_str);
             }
             if (STRIT(str, i) != uname[i]) break;
@@ -293,7 +297,7 @@ void S_intern_gensym(sym) ptr sym; {
   INITSYMHASH(sym) = FIX(hc);
   oblist_insert(sym, idx, GENERATION(sym));
 
-  tc_mutex_release()
+  tc_mutex_release();
 }
 
 /* must hold mutex */

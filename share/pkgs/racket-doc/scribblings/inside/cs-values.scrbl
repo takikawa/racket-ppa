@@ -1,5 +1,7 @@
 #lang scribble/doc
-@(require "utils.rkt")
+@(require "utils.rkt"
+          (for-label racket/unsafe/ops
+                     ffi/unsafe))
 
 @title[#:tag "cs-values+types"]{Values and Types}
 
@@ -31,7 +33,7 @@ There are six global constants:
 
  @item{@cppdef{Snil} --- @racket[null]}
 
- @item{@cppdef{Seof-object} --- @racket[eof-object]}
+ @item{@cppdef{Seof_object} --- @racket[eof-object]}
 
  @item{@cppdef{Svoid} --- @racket[(void)]}
 
@@ -69,7 +71,7 @@ Many of these functions are actually macros.
              Srecordp)]{
 
 Predicates to recognize different kinds of Racket values, such as
-fixnums, characters, the empty list, etc. The @cpp{Srecord} predicate
+fixnums, characters, the empty list, etc. The @cpp{Srecordp} predicate
 recognizes structures, but some built-in Racket datatypes are also
 implemented as records.}
 
@@ -172,15 +174,15 @@ In the case of @cppi{Sstring_utf8}, @var{str} is decoded as
 UTF-8, otherwise it is decided as Latin-1.}
 
 
-@function[(uptr string_length [ptr str])]{
+@function[(uptr Sstring_length [ptr str])]{
 
 Returns the length of the string @var{str}.}
 
-@function[(ptr Sstring_ref [ptr str] [i uptr])]{
+@function[(ptr Sstring_ref [ptr str] [uptr i])]{
 
 Returns the @var{i}th Racket character of the string @var{str}.}
 
-@function[(int Sstring_set [ptr str] [i uptr] [ptr ch])]{
+@function[(int Sstring_set [ptr str] [uptr i] [ptr ch])]{
 
 Installs @var{ch} as the @var{i}th Racket character of the string @var{str}.}
 
@@ -197,12 +199,12 @@ Allocates a fresh mutable @tech[#:doc reference-doc]{vector} of length
 Returns the length of the vector @var{vec}.}
 
 
-@function[(uptr Svector_ref [ptr vec] [i uptr])]{
+@function[(ptr Svector_ref [ptr vec] [uptr i])]{
 
 Returns the @var{i}th element of the vector @var{vec}.}
 
 
-@function[(void Svector_set [ptr vec] [i uptr] [ptr v])]{
+@function[(void Svector_set [ptr vec] [uptr i] [ptr v])]{
 
 Installs @var{v} as the @var{i}th element of the vector @var{vec}.}
 
@@ -218,12 +220,12 @@ length @var{len} and with @var{v} initially in every slot.}
 Returns the length of the fxvector @var{vec}.}
 
 
-@function[(uptr Sfxvector_ref [ptr vec] [i uptr])]{
+@function[(iptr Sfxvector_ref [ptr vec] [uptr i])]{
 
 Returns the @var{i}th fixnum of the fxvector @var{vec}.}
 
 
-@function[(void Sfxvector_set [ptr vec] [i uptr] [ptr v])]{
+@function[(void Sfxvector_set [ptr vec] [uptr i] [ptr v])]{
 
 Installs the fixnum @var{v} as the @var{i}th element of the fxvector
 @var{vec}.}
@@ -239,11 +241,11 @@ length @var{len} and with @var{byte} initially in every slot.}
 
 Returns the length of the byte string @var{bstr}.}
 
-@function[(int Sbytevector_u8_ref [ptr bstr] [i uptr])]{
+@function[(int Sbytevector_u8_ref [ptr bstr] [uptr i])]{
 
 Returns the @var{i}th byte of the byte string @var{bstr}.}
 
-@function[(int Sbytevector_u8_set [ptr bstr] [i uptr] [int byte])]{
+@function[(int Sbytevector_u8_set [ptr bstr] [uptr i] [int byte])]{
 
 Installs @var{byte} as the @var{i}th byte of the byte string @var{bstr}.}
 
@@ -264,3 +266,42 @@ Extract the content of the box @var{bx}.}
 @function[(ptr Sset_box [ptr bx] [ptr v])]{
 
 Installs @var{v} as the content of the box @var{bx}.}
+
+@together[(
+@function[(ptr Srecord_type [ptr rec])]
+@function[(ptr Srecord_type_parent [ptr rtd])]
+@function[(uptr Srecord_type_size [ptr rtd])]
+@function[(int Srecord_type_uniformp [ptr rtd])]
+@function[(ptr Srecord_uniform_ref [ptr rec][iptr i])]
+)]{
+
+Accesses record information, where Racket structures are implemented
+as records. The @cpp{Srecord_type} returns a value representing a
+record's type (so, a structure type). Given a record type,
+@cpp{Srecord_type_parent} returns its supertype or @cpp{Sfalse},
+@cpp{Srecord_type_size} returns the allocation size of a record in
+bytes, and @cpp{Srecord_type_uniformp} indicates whether all of the
+record fields are Scheme values --- which is always true for a Racket
+structure. When a record has all Scheme-valued fields, the allocation
+size is the number of fields plus one times the size of a pointer in
+bytes.
+
+When a record has all Scheme fields (which is the case for all Racket
+structures), @cpp{Srecord_uniform_ref} accesses a field value in the
+same way as @racket[unsafe-struct*-ref].}
+
+@together[(
+@function[(void* racket_cpointer_address [ptr cptr])]
+@function[(void* racket_cpointer_base_address [ptr cptr])]
+@function[(iptr racket_cpointer_offset [ptr cptr])]
+)]{
+
+Extracts an address and offset from a C-pointer object in the sense of
+@racket[cpointer?], but only for values using the predefined representation
+that is not a byte string, @racket[#f], or implemented by a new
+structure type with @racket[prop:cpointer].
+
+The result of @cpp{racket_cpointer_address} is the same as
+@cpp{racket_cpointer_base_address} plus @cpp{racket_cpointer_offset},
+where @cpp{racket_cpointer_offset} is non-zero for C-pointer values
+created by @racket[ptr-add].}
