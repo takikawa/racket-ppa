@@ -77,7 +77,9 @@
 
 (module+ main
   (require racket/cmdline
+           framework
            raco/command-name)
+  (color-prefs:register-info-based-color-schemes)
   (define mode 'auto)
   (command-line
    #:program (short-program+command-name)

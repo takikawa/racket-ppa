@@ -61,13 +61,9 @@ memory that is (assumed to be) managed by the garbage collector,
 @racket[#f] otherwise.
 
 For a pointer based on @racket[_gcpointer] as a result type,
-@racket[cpointer-gcable?] will return @racket[#t]. In the @BC[]
-implementation of Racket, @racket[cpointer-gcable?] will return
-@racket[#f] for a pointer based on @racket[_pointer] as a result type.
-The @CS[] implementation is mostly the same, except that if a pointer is
-extracted using the @racket[_pointer] type from memory allocated as
-@racket['nonatomic], @racket[cpointer-gcable?] will report @racket[#t]
-for the extracted pointer.}
+@racket[cpointer-gcable?] will return @racket[#t]. For a pointer based
+on @racket[_pointer] as a result type, @racket[cpointer-gcable?] will
+return @racket[#f].}
 
 
 @; ----------------------------------------------------------------------
@@ -268,21 +264,21 @@ specification is required at minimum:
      @item{@indexed-racket['nonatomic] --- Allocates memory that can
        be reclaimed by the garbage collector, is treated by the
        garbage collector as holding only pointers, and is initially
-       filled with zeros.
+       filled with zeros. The memory is allowed to contain a mixture of
+       references to objects managed by the garbage collector and
+       addresses that are outside the garbage collector's space.
 
        For the @BC[] Racket implementation, this allocation mode corresponds
-       to @cpp{scheme_malloc} in the C API.
-
-       For the @CS[] Racket implementation, this mode is of limited use,
-       because a pointer allocated this way cannot be passed to
-       foreign functions that expect a pointer to pointers. The result
-       can only be used with functions like @racket[ptr-set!] and
-       @racket[ptr-ref].}
+       to @cpp{scheme_malloc} in the C API.}
 
      @item{@indexed-racket['atomic-interior] --- Like
        @racket['atomic], but the allocated object will not be moved by
        the garbage collector as long as the allocated object is
        retained.
+
+       A better name for this allocation mode would be
+       @racket['atomic-immobile], but it's @racket['atomic-interior]
+       for historical reasons.
 
        For the @BC[] Racket implementation, a reference can point
        to the interior of the object, instead of its starting address.
@@ -293,6 +289,10 @@ specification is required at minimum:
        @racket['nonatomic], but the allocated object will not be moved
        by the garbage collector as long as the allocated object is
        retained.
+
+       A better name for this allocation mode would be
+       @racket['nonatomic-immobile], but it's @racket['interior] for
+       historical reasons.
 
        For the @BC[] Racket implementation, a reference can point
        to the interior of the object, instead of its starting address.
@@ -339,7 +339,10 @@ when the type is a @racket[_gcpointer]- or @racket[_scheme]-based
 type, and @racket['atomic] allocation is used otherwise.
 
 @history[#:changed "6.4.0.10" @elem{Added the @racket['tagged] allocation mode.}
-         #:changed "8.0.0.13" @elem{Changed CS to support the @racket['interior] allocation mode.}]}
+         #:changed "8.0.0.13" @elem{Changed CS to support the @racket['interior] allocation mode.}
+         #:changed "8.1.0.6" @elem{Changed CS to remove constraints on the use of memory allocated
+                                   with the @racket['nonatomic] and @racket['interior] allocation
+                                   modes.}]}
 
 
 @defproc[(free [cptr cpointer?]) void]{
@@ -412,44 +415,45 @@ complete solutions.
 
 As an example for @racket[register-finalizer],
 suppose that you're dealing with a foreign function that returns a
-C string that you should free.  Here is an attempt at creating a suitable type:
+C pointer that you should free, but you mostly want to use the memory
+at a 16-byte offset.  Here is an attempt at creating a suitable type:
 
 @racketblock[
-(define @#,racketidfont{_sixteen-bytes/free}
+(define @#,racketidfont{_pointer-at-sixteen/free}
   (make-ctype _pointer
-              #f (code:comment @#,t{a Racket bytes can be used as a pointer})
+              #f (code:comment @#,t{i.e., just @racket[_pointer] as an argument type})
               (lambda (x)
-                (let ([b (make-sized-byte-string x 16)])
+                (let ([p (ptr-add x 16)])
                   (register-finalizer x free)
-                  b))))
+                  p))))
 ]
 
 The above code is wrong: the finalizer is registered for @racket[x],
-which is no longer needed after the byte string is created.  Changing
-the example to register the finalizer for @racket[b] corrects the problem,
-but then @racket[free] is invoked @racket[b] it instead of on @racket[x].
+which is no longer needed after the new pointer @racket[p] is created.  Changing
+the example to register the finalizer for @racket[p] corrects the problem,
+but then @racket[free] is invoked @racket[p] instead of on @racket[x].
 In the process of fixing this problem, we might be careful and log a message
 for debugging:
 
 @racketblock[
-(define @#,racketidfont{_sixteen-bytes/free}
+(define @#,racketidfont{_pointer-at-sixteen/free}
   (make-ctype _pointer
-              #f (code:comment @#,t{a Racket bytes can be used as a pointer})
+              #f
               (lambda (x)
-                (let ([b (make-sized-byte-string x 16)])
-                  (register-finalizer b
+                (let ([p (ptr-add x 16)])
+                  (register-finalizer p
                     (lambda (ignored)
-                      (log-debug (format "Releasing ~s\n" b))
+                      (log-debug (format "Releasing ~s\n" p))
                       (free x)))
-                  b))))
+                  p))))
 ]
 
 Now, we never see any logged event. The problem is that the finalizer is a
-closure that keeps a reference to @racket[b]. Instead of referencing the
+closure that keeps a reference to @racket[p]. Instead of referencing the
 value that is finalized, use the input argument to the finalizer; simply changing
-@racket[ignored] to @racket[b] above solves the problem.  (Removing the
+@racket[ignored] to @racket[p] above solves the problem.  (Removing the
 debugging message also avoids the problem, since the finalization
-procedure would then not close over @racket[b].)}
+procedure would then not close over @racket[p].)}
 
 
 @deftogether[(

@@ -331,12 +331,10 @@
           [prefix drracket:app: drracket:app^]
           [prefix help: drracket:help-desk^]
           [prefix drracket:multi-file-search: drracket:multi-file-search^]
-          [prefix drracket:init: drracket:init^]
+          [prefix drracket:init: drracket:init/int^]
           [prefix drracket: drracket:interface^])
   (export (rename drracket:frame/int^
                   [-mixin mixin]))
-  
-  (define last-keybindings-planet-attempt "")
   
   (define basics-mixin
     (mixin (frame:standard-menus<%>) (drracket:frame:basics<%>)
@@ -469,28 +467,6 @@
                                            this)])
                             (when filename
                               (add-keybindings-item/update-prefs filename)))))))
-                (new menu-item%
-                     (parent keybindings-menu)
-                     (label (string-constant keybindings-add-user-defined-keybindings/planet))
-                     (callback
-                      (λ (x y)
-                        (define planet-spec
-                          (get-text-from-user (string-constant drscheme)
-                                              (string-constant keybindings-type-planet-spec)
-                                              this
-                                              last-keybindings-planet-attempt))
-                        (when planet-spec
-                          (set! last-keybindings-planet-attempt planet-spec)
-                          (cond
-                            [(planet-string-spec? planet-spec)
-                             =>
-                             (λ (planet-sexp-spec)
-                               (add-keybindings-item/update-prefs planet-sexp-spec))]
-                            [else
-                             (message-box (string-constant drscheme)
-                                          (format (string-constant keybindings-planet-malformed-spec)
-                                                  planet-spec)
-                                          #:dialog-mixin frame:focus-table-mixin)])))))
                 (define ud (preferences:get 'drracket:user-defined-keybindings))
                 (unless (null? ud)
                   (new separator-menu-item% (parent keybindings-menu))

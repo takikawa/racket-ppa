@@ -92,8 +92,8 @@ typedef int IFASLCODE;      /* fasl type codes */
 
 #define find_room(tc, s, g, t, n, x) find_gc_room_T(THREAD_GC(tc), s, g, t, n, ALREADY_PTR, x)
 #define find_gc_room(tgc, s, g, t, n, x) find_gc_room_T(tgc, s, g, t, n, ALREADY_PTR, x)
-#define find_room_voidp(tc, s, g, n, x) find_gc_room_T(THREAD_GC(tc), s, g, typemod, n, TO_VOIDP, x)
-#define find_gc_room_voidp(tgc, s, g, n, x) find_gc_room_T(tgc, s, g, typemod, n, TO_VOIDP, x)
+#define find_room_voidp(tc, s, g, n, x) find_gc_room_T(THREAD_GC(tc), s, g, type_untyped, n, TO_VOIDP, x)
+#define find_gc_room_voidp(tgc, s, g, n, x) find_gc_room_T(tgc, s, g, type_untyped, n, TO_VOIDP, x)
 
 /* new-space inline allocation --- no mutex required */
 /* Like `find_room`, but always `space_new` and generation 0,
@@ -111,7 +111,7 @@ typedef int IFASLCODE;      /* fasl type codes */
  } while(0)
 
 #define newspace_find_room(tc, t, n, x) newspace_find_room_T(tc, t, n, ALREADY_PTR, x)
-#define newspace_find_room_voidp(tc, n, x) newspace_find_room_T(tc, typemod, n, TO_VOIDP, x)
+#define newspace_find_room_voidp(tc, n, x) newspace_find_room_T(tc, type_untyped, n, TO_VOIDP, x)
 
 #ifndef NO_PRESERVE_FLONUM_EQ
 # define PRESERVE_FLONUM_EQ
@@ -553,6 +553,9 @@ typedef struct thread_gc {
 
 #define INCRGEN(g) (g = g == S_G.max_nonstatic_generation ? static_generation : g+1)
 #define FIXMEDIATE(x) (Sfixnump(x) || Simmediatep(x))
+
+#define Sbytevector_reference_length(p) (Sbytevector_length(p) >> log2_ptr_bytes)
+#define INITBVREFIT(p, i) (*(ptr *)(&BVIT(p, (i) << log2_ptr_bytes)))
 
 /* For `memcpy_aligned, that the first two arguments are word-aligned
    and it would be ok to round up the length to a word size. But

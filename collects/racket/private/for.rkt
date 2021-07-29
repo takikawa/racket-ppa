@@ -2178,6 +2178,7 @@
             #'id #'a #'b #'step
             (and (memq (syntax-e #'step) '(1 -1))
                  (fixnum? (syntax-e #'a))
+                 (fixnum? (syntax-e #'b))
                  (fixnum? ((if (eq? (syntax-e #'step) 1) add1 sub1)
                            (syntax-e #'b))))
             #'(check-range-generic 'in-inclusive-range)
@@ -2310,7 +2311,7 @@
     (lambda (stx)
       (syntax-case stx ()
         [[(id) (_ expr)]
-         #'[(id) (:do-in ([(id) expr]) #t () #t () #t #f ())]]
+         #'[(id) (:do-in ([(id*) expr]) #t () #t ([(id) id*]) #t #f ())]]
         [_ #f])))
 
   (define-sequence-syntax *in-producer

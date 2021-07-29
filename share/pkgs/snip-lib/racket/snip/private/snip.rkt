@@ -1222,7 +1222,7 @@
     mask)
 
   (def/override (other-equal-to? [snip% other] [any? recur])
-    (and (is-a? other this%)
+    (and (is-a? other image-snip%)
          (let* ([bm (send this get-bitmap)]
                 [bm2 (send other get-bitmap)])
            (and

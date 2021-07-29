@@ -33,29 +33,33 @@
                 [else
                  (loop (cons arg ho-contracts) flat-contracts (cdr args))]))])))
      (define pred (make-flat-predicate flat-contracts))
+     (define the-or/c
+       (cond
+         [(null? ho-contracts)
+          (cond
+            [(and (pair? flat-contracts)
+                  (pair? (cdr flat-contracts))
+                  (null? (cddr flat-contracts))
+                  (or (and (equal? false/c-contract (car flat-contracts))
+                           (equal? true/c-contract (cadr flat-contracts)))
+                      (and (equal? false/c-contract (cadr flat-contracts))
+                           (equal? true/c-contract (car flat-contracts)))))
+             (coerce-contract 'or/c boolean?)]
+            [else
+             (make-flat-or/c pred flat-contracts)])]
+         [(null? (cdr ho-contracts))
+          (define name (apply build-compound-type-name 'or/c args))
+          (if (chaperone-contract? (car ho-contracts))
+              (make-chaperone-single-or/c name pred flat-contracts (car ho-contracts))
+              (make-impersonator-single-or/c name pred flat-contracts (car ho-contracts)))]
+         [else
+          (define name (apply build-compound-type-name 'or/c args))
+          (if (andmap chaperone-contract? ho-contracts)
+              (make-chaperone-multi-or/c name flat-contracts ho-contracts)
+              (make-impersonator-multi-or/c name flat-contracts ho-contracts))]))
      (cond
-       [(null? ho-contracts)
-        (cond
-          [(and (pair? flat-contracts)
-                (pair? (cdr flat-contracts))
-                (null? (cddr flat-contracts))
-                (or (and (equal? false/c-contract (car flat-contracts))
-                         (equal? true/c-contract (cadr flat-contracts)))
-                    (and (equal? false/c-contract (cadr flat-contracts))
-                         (equal? true/c-contract (car flat-contracts)))))
-           (coerce-contract 'or/c boolean?)]
-          [else
-           (make-flat-or/c pred flat-contracts)])]
-       [(null? (cdr ho-contracts))
-        (define name (apply build-compound-type-name 'or/c args))
-        (if (chaperone-contract? (car ho-contracts))
-            (make-chaperone-single-or/c name pred flat-contracts (car ho-contracts))
-            (make-impersonator-single-or/c name pred flat-contracts (car ho-contracts)))]
-       [else
-        (define name (apply build-compound-type-name 'or/c args))
-        (if (andmap chaperone-contract? ho-contracts)
-            (make-chaperone-multi-or/c name flat-contracts ho-contracts)
-            (make-impersonator-multi-or/c name flat-contracts ho-contracts))])]))
+       [(ormap prop:any/c? args) (named-any/c (contract-name the-or/c))]
+       [else the-or/c])]))
 
 (define/subexpression-pos-prop first-or/c
   (case-lambda 
@@ -74,14 +78,46 @@
   (cond
     [(null? flat-contracts) not]
     [else
-     (let loop ([fst (car flat-contracts)]
-                [rst (cdr flat-contracts)])
-       (let ([fst-pred (flat-contract-predicate fst)])
+     (define-values (eqables noneqables)
+       (let loop ([flat-contracts flat-contracts])
          (cond
-           [(null? rst) fst-pred]
-           [else 
-            (let ([r (loop (car rst) (cdr rst))])
-              (λ (x) (or (fst-pred x) (r x))))])))]))
+           [(null? flat-contracts)
+            (values '() '())]
+           [else
+            (define fst (car flat-contracts))
+            (define-values (eqables noneqables)
+              (loop (cdr flat-contracts)))
+            (cond
+              [(eq-contract? fst)
+               (values (cons fst eqables) noneqables)]
+              [else
+               (values eqables (cons fst noneqables))])])))
+
+     (define eqables-pred
+       (cond
+         [(pair? eqables)
+          (define vals (map eq-contract-val eqables))
+          (λ (x) (and (memq x vals) #t))]
+         [else #f]))
+     (define noneqables-pred
+       (cond
+         [(pair? noneqables)
+          (let loop ([fst (car noneqables)]
+                     [rst (cdr noneqables)])
+            (define fst-pred (flat-contract-predicate fst))
+            (cond
+              [(null? rst) fst-pred]
+              [else
+               (define r (loop (car rst) (cdr rst)))
+               (λ (x)
+                 (or (fst-pred x) (r x)))]))]
+         [else #f]))
+     (cond
+       [(and eqables-pred noneqables-pred)
+        (λ (x) (or (eqables-pred x) (noneqables-pred x)))]
+       [eqables-pred eqables-pred]
+       [noneqables-pred noneqables-pred]
+       [else (error 'ack.orc.rkt)])]))
 
 (define (single-or/c-late-neg-projection ctc)
   (define c-proj (get/build-late-neg-projection (single-or/c-ho-ctc ctc)))

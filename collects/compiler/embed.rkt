@@ -14,6 +14,7 @@
          file/ico
          racket/private/so-search
          racket/private/share-search
+         racket/private/link-path
          setup/cross-system
          "private/cm-minimal.rkt"
          "private/winsubsys.rkt"
@@ -106,7 +107,7 @@
          [fixup (lambda (re sfx)
                   (if (regexp-match re (path->bytes path))
                       path
-                      (path-replace-extension path sfx)))])
+                      (path-add-extension path sfx #".")))])
     (case (cross-system-type)
       [(windows) (fixup #rx#".[.][eE][xX][eE]$" #".exe")]
       [(macosx) (if mred?
@@ -150,10 +151,28 @@
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define (find-relevant-lib-dir f #:default [default #f])
+  (or
+   (for/or ([lib-dir (in-list (get-cross-lib-search-dirs))])
+     (define p (build-path lib-dir f))
+     (and (or (file-exists? p)
+              (directory-exists? p))
+          lib-dir))
+   default
+   (error 'find-relevant-lib-dir
+          "could not find ~s"
+          f)))
+
+(define (find-in-lib f)
+  (build-path (find-relevant-lib-dir f #:default (find-lib-dir))
+              f))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (define (prepare-macosx-mred exec-name dest aux variant)
   (let* ([name (let-values ([(base name dir?) (split-path dest)])
                  (path-replace-extension name #""))]
-         [src (build-path (find-lib-dir) "Starter.app")]
+         [src (find-in-lib "Starter.app")]
          [creator (let ([c (assq 'creator aux)])
                     (or (and c
                              (cdr c))
@@ -291,31 +310,6 @@
                 resource-files))
     (build-path dest "Contents" "MacOS" name)))
 
-;; The starter-info file is now disabled. The GRacket
-;; command line is handled the same as the Racket command
-;; line.
-(define use-starter-info? #f)
-(define (finish-osx-mred dest flags exec-name keep-exe? relative?)
-  (call-with-output-file (build-path dest 
-                                     "Contents" 
-                                     "Resources" 
-                                     "starter-info")
-    #:exists 'truncate
-    (lambda (port)
-      (write-plist 
-       `(dict ,@(if keep-exe?
-                    `((assoc-pair "executable name"
-                                  ,(path->string 
-                                    (if relative?
-                                        (relativize exec-name dest
-                                                    (lambda (p)
-                                                      (build-path 'up 'up 'up p)))
-                                        exec-name))))
-                    null)
-              (assoc-pair "stored arguments"
-                          (array ,@flags)))
-       port))))
-
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; Represent modules with lists starting with the filename, so we
@@ -331,7 +325,7 @@
         actual-file-path
         use-source?))
 
-(define (mod-file m) (car m))
+(define (mod-file m) (strip-submod (car m)))
 (define (mod-mod-path m) (cadr m))
 (define (mod-code m) (caddr m))
 (define (mod-name m) (list-ref m 3))
@@ -735,10 +729,13 @@
                                                                        ;; Assert: base should refer to this module:
                                                                        (let-values ([(path2 base2) (module-path-index-split base)])
                                                                          (when (or path2 base2)
-                                                                           (error 'embed "unexpected nested module path index")))
+                                                                           (error 'embed "unexpected nested module path index ~s" base)))
                                                                        (cons path (lookup-full-name sub-filename)))))
                                                               ;; a run-time path:
-                                                              (cons sub-path (lookup-full-name sub-filename)))))
+                                                              (cons (if (path? sub-path)
+                                                                        `(path ,(encode-link-path sub-path))
+                                                                        sub-path)
+                                                                    (lookup-full-name sub-filename)))))
                                                    (append all-file-imports (map (lambda (p) #f) extra-runtime-paths))
                                                    (append sub-files (take extra-files (length extra-runtime-paths)))
                                                    (append sub-paths extra-runtime-paths)))
@@ -1316,12 +1313,17 @@
                                                                      (path->bytes p)
                                                                      (if (and (pair? p)
                                                                               (eq? 'module (car p)))
-                                                                         (list 'module (cadr p))
+                                                                         (list 'module (let ([p (cadr p)])
+                                                                                         (if (path? p)
+                                                                                             `(path ,(encode-link-path p))
+                                                                                             p)))
                                                                          p)))
                                                            (let ([p (cond
                                                                      [(bytes? p) (bytes->path p)]
                                                                      [(so-spec? p)
-								      (define path (so-find p))
+								      (define path (so-find p
+                                                                                            (cross-system-type 'so-suffix)
+                                                                                            (get-cross-lib-search-dirs)))
 								      (cond
 									[(and path embedded-dlls-box)
 									 (set-box! embedded-dlls-box (cons path (unbox embedded-dlls-box)))
@@ -1417,6 +1419,12 @@
               literal-files)
     (for-each (lambda (v) (write v outp)) literal-expressions)))
 
+(define (make-default-compiler expand-namespace)
+  (lambda (expr)
+    (parameterize ([current-namespace expand-namespace]
+                   [current-compile-target-machine (get-compile-target-machine)])
+      (compile expr))))
+
 (define (write-module-bundle #:verbose? [verbose? #f]
                              #:modules [modules null]
                              #:configure-via-first-module? [config? #f]
@@ -1425,10 +1433,7 @@
                              #:literal-expressions [literal-expressions null]
                              #:on-extension [on-extension #f]
                              #:expand-namespace [expand-namespace (current-namespace)]
-                             #:compiler [compiler (lambda (expr)
-                                                    (parameterize ([current-namespace expand-namespace]
-                                                                   [current-compile-target-machine (get-compile-target-machine)])
-                                                      (compile expr)))]
+                             #:compiler [compiler (make-default-compiler expand-namespace)]
                              #:src-filter [src-filter (lambda (filename) #f)]
                              #:get-extra-imports [get-extra-imports (lambda (filename code) null)])
   (do-write-module-bundle (current-output-port) verbose? modules 
@@ -1494,9 +1499,7 @@
                                      #:collects-dest [collects-dest #f]
                                      #:on-extension [on-extension #f]
                                      #:expand-namespace [expand-namespace (current-namespace)]
-                                     #:compiler [compiler (lambda (expr)
-                                                            (parameterize ([current-namespace expand-namespace])
-                                                              (compile expr)))]
+                                     #:compiler [compiler (make-default-compiler expand-namespace)]
                                      #:src-filter [src-filter (lambda (filename) #f)]
                                      #:get-extra-imports [get-extra-imports (lambda (filename code) null)])
   (define mred? (or really-mred? gracket?))
@@ -1508,9 +1511,7 @@
                              (let ([m (assq 'original-exe? aux)])
                                (or (not m)
                                    (not (cdr m))))))
-  (define long-cmdline? (or (eq? (cross-system-type) 'windows)
-                            (eq? (cross-system-type) 'macosx)
-                            unix-starter?))
+  (define long-cmdline? #t)
   (define relative? (let ([m (assq 'relative? aux)])
                       (and m (cdr m))))
   (define collects-path-bytes (collects-path->bytes 
@@ -1534,14 +1535,13 @@
                   (cond
                     [(and mred? (eq? 'macosx (cross-system-type)))
                      (values (prepare-macosx-mred exe dest aux variant) 
-                             (mac-dest->executable (build-path (find-lib-dir) "Starter.app")
+                             (mac-dest->executable (find-in-lib "Starter.app")
                                                    #t)
                              #t)]
                     [unix-starter?
-                     (let ([starter (build-path (find-lib-dir) 
-                                                (if (force exe-suffix?)
-                                                    "starter.exe"
-                                                    "starter"))])
+                     (let ([starter (find-in-lib (if (force exe-suffix?)
+                                                     "starter.exe"
+                                                     "starter"))])
                        (when (or (file-exists? dest)
                                  (directory-exists? dest)
                                  (link-exists? dest))
@@ -1580,7 +1580,7 @@
                                            mred?)
                     (when mred?
                       ;; adjust relative path, since exe may change directory :
-                      (define rel (find-relative-path* dest (find-lib-dir)))
+                      (define rel (find-relative-path* dest (find-relevant-lib-dir "Racket.framework")))
                       (update-framework-path (format "@executable_path/../../../~a"
                                                      (path->directory-path rel))
                                              (mac-dest->executable dest mred?)
@@ -1590,7 +1590,7 @@
                   (when (regexp-match #rx"^@executable_path" 
                                       (get-current-framework-path dest "Racket"))
                     (update-framework-path (string-append
-                                            (path->string (find-lib-dir))
+                                            (path->string (find-relevant-lib-dir "Racket.framework"))
                                             "/")
                                            dest
                                            mred?))))))
@@ -1625,7 +1625,7 @@
                                         dest))])
             (define (gui-bin->config rel)
               ;; Find the path to config-dir relative to the executable
-              (define p (find-relative-path* dest (find-config-dir)))
+              (define p (find-relative-path* (if keep-exe? orig-exe dest) (find-config-dir)))
               (simplify-path
                (if (eq? rel 'same)
                    p
@@ -1634,18 +1634,17 @@
             (if m
                 (if (cdr m)
                     (update-config-dir (dest->executable dest) (cdr m))
-                    (when mred?
+                    (when (and mred? (not keep-exe?))
                       (cond
-                       [osx?
-                        ;; adjust relative path (since GRacket is likely off by one):
-                        (update-config-dir (mac-dest->executable dest mred?)
-                                           (gui-bin->config "../../.."))]
-                       [(eq? 'windows (cross-system-type))
-                        (unless keep-exe?
-                          ;; adjust relative path (since GRacket is likely off by one):
-                          (update-config-dir dest (gui-bin->config 'same)))]
-                       [else
-                        (update-config-dir dest (gui-bin->config 'same))])))
+                        [osx?
+                         ;; adjust relative path (since GRacket is likely off by one):
+                         (update-config-dir (mac-dest->executable dest mred?)
+                                            (gui-bin->config "../../.."))]
+                        [(eq? 'windows (cross-system-type))
+                         ;; adjust relative path (since GRacket is likely off by one):
+                         (update-config-dir dest (gui-bin->config 'same))]
+                        [else
+                         (update-config-dir dest (gui-bin->config 'same))])))
                 ;; Check whether we need an absolute path to config:
                 (let ([dir (get-current-config-dir (dest->executable dest))])
                   (when (relative-path? dir)
@@ -1675,10 +1674,11 @@
 		   (lambda (start decl-end end)
 		     (let ([start-s (number->string start)]
 			   [decl-end-s (number->string decl-end)]
-                       [end-s (number->string end)])
+                           [end-s (number->string end)])
 		       (append (if launcher?
-				   (if (and (eq? 'windows (cross-system-type))
-					    keep-exe?)
+				   (if (and keep-exe?
+                                            ;; a unix starter uses the same path as it execs
+                                            (not unix-starter?))
 				       ;; argv[0] replacement:
 				       (list (path->string 
 					      (if relative?
@@ -1759,15 +1759,18 @@
 				new-rsrcs))
 			  (update-resources dest-exe pe new+dll-rsrcs)
                           (values 0 decl-len init-len (+ init-len cmdline-len))]
-                         [(and (eq? (cross-system-type) 'macosx)
-                               (not unix-starter?))
+                         [(memq (cross-system-type 'os*) '(macosx darwin))
                           ;; For Mach-O, we know how to add a proper segment
+                          (remove-signature dest-exe) ; may be needed in 'darwin mode
                           (define s (open-output-bytes))
                           (define decl-len (write-module s))
                           (let* ([s (get-output-bytes s)]
                                  [cl (let ([o (open-output-bytes)])
                                        ;; position is relative to __PLTSCHEME:
-                                       (write-cmdline (make-full-cmdline 0 decl-len (bytes-length s)) o)
+                                       (let ([cmdline (make-full-cmdline 0 decl-len (bytes-length s))])
+                                         (cond
+                                           [unix-starter? (display (make-starter-cmdline cmdline) o)]
+                                           [else (write-cmdline cmdline o)]))
                                        (get-output-bytes o))])
                             (let ([start (add-plt-segment 
                                           dest-exe 
@@ -1780,28 +1783,25 @@
                                         (+ start (bytes-length s))
                                         (+ start (bytes-length s) (bytes-length cl))))))]
                          [else
-                          ;; Unix starter: Maybe ELF, in which case we 
+                          ;; Unix starter or direct embedding: Maybe ELF, in which case we 
                           ;; can add a proper section
                           (define-values (s e dl p)
-                            (if unix-starter?
-                                (add-racket-section 
-                                 orig-exe 
-                                 dest-exe
-                                 (if launcher? #".rackcmdl" #".rackprog")
-                                 (lambda (start)
-                                   (let ([s (open-output-bytes)])
-                                     (define decl-len (write-module s))
-                                     (let ([p (file-position s)])
-                                       (display (make-starter-cmdline
-                                                 (make-full-cmdline start 
-                                                                    (+ start decl-len)
-                                                                    (+ start p)))
-                                                s)
-                                       (values (get-output-bytes s) decl-len p)))))
-                                (values #f #f #f #f)))
+                            (add-racket-section 
+                             orig-exe 
+                             dest-exe
+                             #".rackprog"
+                             (lambda (start)
+                               (let ([s (open-output-bytes)])
+                                 (define decl-len (write-module s))
+                                 (let ([p (file-position s)])
+				   (let ([cmdline (make-full-cmdline 0 decl-len p)])
+				     (cond
+				      [unix-starter? (display (make-starter-cmdline cmdline) s)]
+				      [else (write-cmdline cmdline s)]))
+                                   (values (get-output-bytes s) decl-len p))))))
                           (if (and s e)
-                             ;; ELF succeeded:
-                             (values s (+ s dl) (+ s p) e)
+                             ;; ELF succeeded, so make values relative to start:
+                             (values 0 dl p (- e s))
                              ;; Otherwise, just add to the end of the file:
                              (let ([start (file-size dest-exe)])
                                (define decl-end
@@ -1819,7 +1819,7 @@
                   (when verbose?
                     (eprintf "Setting collection path\n"))
                   (set-collects-path dest-exe collects-path-bytes)]
-                 [mred?
+                 [(and mred? (not keep-exe?))
                   (cond
                    [osx?
                     ;; default path in `gracket' is off by one:
@@ -1827,13 +1827,10 @@
 						 (build-path 'up 'up 'up
                                                              (find-relative-path* dest (find-collects-dir)))))]
                    [(eq? 'windows (cross-system-type))
-                    (unless keep-exe?
-                      ;; off by one in this case, too:
-                      (set-collects-path dest-exe (path->bytes
-						   (find-relative-path* dest (find-collects-dir)))))])])
+                    ;; off by one in this case, too:
+                    (set-collects-path dest-exe (path->bytes
+                                                 (find-relative-path* dest (find-collects-dir))))])])
                 (cond
-                  [(and use-starter-info? osx?)
-                   (finish-osx-mred dest full-cmdline exe keep-exe? relative?)]
                   [unix-starter?
                    (let ([numpos (with-input-from-file dest-exe 
                                    (lambda () (find-cmdline 
@@ -1846,11 +1843,11 @@
                                                      "exeuctable type"
                                                      #"bINARy tYPe:"))))]
                          [cmdline (if cmdline-end
-					  #f
-					  (make-starter-cmdline full-cmdline))]
+                                      #f
+                                      (make-starter-cmdline full-cmdline))]
                          [out (open-output-file dest-exe #:exists 'update)])
                      (let ([old-cmdline-end cmdline-end]
-			       [cmdline-end (or cmdline-end (+ end (bytes-length cmdline)))]
+                           [cmdline-end (or cmdline-end (+ end (bytes-length cmdline)))]
                            [write-num (lambda (n)
                                         (write-bytes (integer->integer-bytes n 4 #t #f) out))])
                        (dynamic-wind
@@ -1868,7 +1865,7 @@
                               (write-bytes #"s" out))
                             (flush-output out))
                           (file-position out (+ numpos 7))
-                          (write-bytes #"!" out)
+                          (write-bytes (if keep-exe? #"*" #"!") out)
                           (write-num start)
                           (write-num decl-end)
                           (write-num end)
@@ -1876,10 +1873,10 @@
                           (write-num (length full-cmdline))
                           (write-num (if mred? 1 0))
                           (flush-output out)
-			      (unless old-cmdline-end
-				(file-position out end)
-				(write-bytes cmdline out)
-				(flush-output out)))
+                          (unless old-cmdline-end
+                            (file-position out end)
+                            (write-bytes cmdline out)
+                            (flush-output out)))
                         (lambda ()
                           (close-output-port out)))))]
                   [else
@@ -1920,7 +1917,7 @@
                                              (file-position out))])
                             (file-position out cmdpos)
                             (fprintf out "~a...~a~a"
-                                     (if (and keep-exe? (eq? 'windows (cross-system-type))) "*" "?")
+                                     (if keep-exe? "*" "?")
                                      (integer->integer-bytes end 4 #t #f)
                                      (integer->integer-bytes (- new-end end) 4 #t #f)))))
                       (lambda ()
@@ -1933,7 +1930,7 @@
                                    (assq 'subsystem aux))])
                        (when m
                          (set-subsystem dest-exe (cdr m)))))]))))
-          (when (eq? (cross-system-type) 'macosx)
+          (when (memq (cross-system-type 'os*) '(macosx darwin))
             (add-ad-hoc-signature dest-exe))
           (done-writable dest-exe old-perms))))))
 

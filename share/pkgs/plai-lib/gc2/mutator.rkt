@@ -279,7 +279,10 @@
 (define-syntax (mutator-app stx)
   (syntax-case stx ()
     [(_ e ...)
-     (local [(define (do-not-expand? exp) (identifier? exp))
+     (local [(define (do-not-expand? exp)
+               (and (identifier? exp)
+                    (not (set!-transformer?
+                           (syntax-local-value exp (lambda () #f))))))
              (define exps (syntax->list #'(e ...)))
              (define tmps
                (generate-temporaries #'(e ...)))]

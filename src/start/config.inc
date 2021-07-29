@@ -1,5 +1,36 @@
 /* This code fragment embeds strings in an executable that can be
-   updated with various Racket exe-manipulation tools. */
+   updated with various Racket exe-manipulation tools. 
+
+   Used by CS's "main.c" and BC's "cmdline.inc".
+
+   Functions that are "exported":
+
+      self_exe_t get_self_path(char *argv0);
+      void extract_built_in_arguments(const self_exe_t self_exe, 
+                                      char **_prog, char **_sprog,
+                                      int *_argc, char ***_argv);
+      char *SELF_PATH_TO_BYTES(self_exe_t)
+
+      char *extract_coldir();
+      char *extract_configdir();
+
+      long get_segment_offset(self_exe_t self); // added to `-k` arguments
+
+    Windows:
+      self_exe_t is wchar_t
+      wchar_t *extract_dlldir();
+      long find_resource_offset(const wchar_t *path, int id, long delta);
+      char *string_to_utf8(wchar_t *p);
+
+    Mac OS:
+      long find_mach_o_segment(const char *name, long *_len);
+
+    Unix:
+      int find_elf_section_offset(const char *filename,
+                                  const char *name,
+                                  int *_start, int *_end);
+
+*/
 
 #pragma GCC diagnostic ignored "-Wwrite-strings"
 
@@ -99,15 +130,19 @@ static int _configdir_offset = 17; /* Skip permanent tag */
 # define XFORM_OK_PLUS +
 #endif
 
-#ifdef OS_X
-# include <mach-o/getsect.h>
-# include <mach-o/dyld.h>
-# include <fcntl.h>
-#endif
-
 #ifdef DOS_FILE_SYSTEM
 # include <windows.h>
+#else
+# include <errno.h>
+# include <fcntl.h>
+# include <sys/types.h>
+# include <sys/uio.h>
+# include <unistd.h>
+#endif
 
+#include "self_exe.inc"
+
+#ifdef DOS_FILE_SYSTEM
 #ifndef DLL_RELATIVE_PATH
 # define DLL_RELATIVE_PATH L"lib"
 #endif
@@ -127,40 +162,13 @@ END_XFORM_SKIP;
 #endif
 
 #ifdef OS_X
-static long get_segment_offset()
+static long get_segment_offset(const char *me)
 {
-# if defined(__x86_64__) || defined(__arm64__)
-  const struct segment_command_64 *seg;
-# else
-  const struct segment_command *seg;
-#endif
-  seg = getsegbyname("__PLTSCHEME");
-  if (seg)
-    return seg->fileoff;
-  else
-    return 0;
+  return find_mach_o_segment("__PLTSCHEME", NULL);
 }
 #endif
 
 #ifdef DOS_FILE_SYSTEM
-wchar_t *get_self_executable_path() XFORM_SKIP_PROC
-{
-  wchar_t *path;
-  DWORD r, sz = 1024;
-
-  while (1) {
-    path = (wchar_t *)malloc(sz * sizeof(wchar_t));
-    r = GetModuleFileNameW(NULL, path, sz);
-    if ((r == sz)
-        && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
-      free(path);
-      sz = 2 * sz;
-    } else
-      break;
-  }
-
-  return path;
-}
 
 static DWORD find_by_id(HANDLE fd, DWORD rsrcs, DWORD pos, int id, long delta) XFORM_SKIP_PROC
 {
@@ -185,7 +193,7 @@ static DWORD find_by_id(HANDLE fd, DWORD rsrcs, DWORD pos, int id, long delta) X
   return 0;
 }
 
-static long find_resource_offset(wchar_t *path, int id, long delta) XFORM_SKIP_PROC
+static long find_resource_offset(const wchar_t *path, int id, long delta) XFORM_SKIP_PROC
 {
   /* Find the resource of type `id` */
   HANDLE fd;
@@ -258,45 +266,55 @@ static long find_resource_offset(wchar_t *path, int id, long delta) XFORM_SKIP_P
   }
 }
 
-static long get_segment_offset() XFORM_SKIP_PROC
+static long get_segment_offset(const wchar_t *me) XFORM_SKIP_PROC
 {
-  return find_resource_offset(get_self_executable_path(), 257, 0);
+  return find_resource_offset(me, 257, 0);
+}
+
+static char *string_to_utf8(wchar_t *p) XFORM_SKIP_PROC
+{
+  char *r;
+  int len;
+
+  len = WideCharToMultiByte(CP_UTF8, 0, p, -1, NULL, 0, NULL, NULL);
+  r = malloc(len);
+  len = WideCharToMultiByte(CP_UTF8, 0, p, -1, r, len, NULL, NULL);
+
+  return r;
+}
+
+# define SELF_PATH_TO_BYTES(s) string_to_utf8(s)
+
+#else
+
+# define SELF_PATH_TO_BYTES(s) s
+
+#endif
+
+#if !defined(OS_X) && !defined(DOS_FILE_SYSTEM)
+
+static long get_segment_offset(const char *me) XFORM_SKIP_PROC
+{
+  int start = 0, end = 0;
+
+  (void)find_elf_section_offset(me, ".rackprog", &start, &end);
+  
+  return start;
 }
 
 #endif
 
-static void extract_built_in_arguments(char **_prog, char **_sprog, int *_argc, char ***_argv)
+static void extract_built_in_arguments(const self_exe_t self_exe, char **_prog, char **_sprog, int *_argc, char ***_argv)
 {
   GC_CAN_IGNORE char *prog = *_prog;
   GC_CAN_IGNORE char *sprog = *_sprog;
   
 #ifdef DOS_FILE_SYSTEM
-  {
-    /* For consistency, strip trailing spaces and dots, and make sure the .exe
-       extension is present. */
-    int l = strlen(prog);
-    if ((l > 0) && ((prog[l-1] == ' ') || (prog[l-1] == '.'))) {
-      char *s;
-      while ((l > 0) && ((prog[l-1] == ' ') || (prog[l-1] == '.'))) {
-	l--;
-      }
-      s  = (char *)malloc(l + 1);
-      memcpy(s, prog, l);
-      s[l] = 0;
-      prog = s;
-    }
-    if (l <= 4 
-	|| (prog[l - 4] != '.')
-	|| (tolower(((unsigned char *)prog)[l - 3]) != 'e')
-	|| (tolower(((unsigned char *)prog)[l - 2]) != 'x')
-	|| (tolower(((unsigned char *)prog)[l - 1]) != 'e')) {
-      char *s;
-      s  = (char *)malloc(l + 4 + 1);
-      memcpy(s, prog, l);
-      memcpy(s + l, ".exe", 5);
-      prog = s;
-    }
-  }
+  /* Replacing `prog` with `self_exe` has the effect of stripping trailing spaces
+     and dots, if they were in the command line, as well as adding an `.exe`
+     if its wasn't alerady present. It also avoids the problem that WSL2 currently
+     launches Windows programs without the path used to reference them. */
+  prog = string_to_utf8(self_exe);
 #endif
 
   /* If scheme_cmdline_exe_hack is changed, then we extract built-in
@@ -311,9 +329,9 @@ static void extract_built_in_arguments(char **_prog, char **_sprog, int *_argc, 
     char **argv2;
 
     p = NULL;
-#ifdef DOS_FILE_SYSTEM
     if ((scheme_cmdline_exe_hack[0] == '?')
 	|| (scheme_cmdline_exe_hack[0] == '*')) {
+#ifdef DOS_FILE_SYSTEM
       /* This is how we make launchers in Windows. The cmdline is
 	 added as a resource of type 257. The long integer at
 	 scheme_cmdline_exe_hack[4] says where the command line starts
@@ -321,9 +339,8 @@ static void extract_built_in_arguments(char **_prog, char **_sprog, int *_argc, 
 	 the cmdline string is. It might be relative to the
 	 executable. */
       HANDLE fd;
-      wchar_t *path;
+      wchar_t *path = self_exe;
 
-      path = get_self_executable_path();
       fd = CreateFileW(path, GENERIC_READ,
 		       FILE_SHARE_READ | FILE_SHARE_WRITE,
 		       NULL,
@@ -337,7 +354,7 @@ static void extract_built_in_arguments(char **_prog, char **_sprog, int *_argc, 
 	DWORD got;
 	start = *(long *)&scheme_cmdline_exe_hack[4];
 	len = *(long *)&scheme_cmdline_exe_hack[8];
-	start += get_segment_offset();
+	start += get_segment_offset(self_exe);
 	p = (unsigned char *)malloc(len);
 	SetFilePointer(fd, start, 0, FILE_BEGIN);
 	ReadFile(fd, p, len, &got, NULL);
@@ -357,19 +374,13 @@ static void extract_built_in_arguments(char **_prog, char **_sprog, int *_argc, 
 	  } else {
 	    /* Make it absolute, relative to this executable */
 	    int plen = strlen(prog);
-	    int mlen, len;
+	    int mlen;
 	    char *s2, *p2;
 
 	    /* UTF-8 encode path: */
-	    for (len = 0; path[len]; len++) { }
-	    mlen = scheme_utf8_encode((unsigned int *)path, 0, len,
-				      NULL, 0,
-				      1 /* UTF-16 */);
-	    p2 = (char *)malloc(mlen + 1);
-	    mlen = scheme_utf8_encode((unsigned int *)path, 0, len,
-				      (unsigned char *)p2, 0,
-				      1 /* UTF-16 */);
+            p2 = string_to_utf8(path);
 
+	    for (mlen = 0; p2[mlen]; mlen++) { }
 	    while (mlen && (p2[mlen - 1] != '\\')) {
 	      mlen--;
 	    }
@@ -386,14 +397,10 @@ static void extract_built_in_arguments(char **_prog, char **_sprog, int *_argc, 
 		+ 4);
 	}
       }
-      free(path);
-    }
-#endif
-#if defined(OS_X)
-    if (scheme_cmdline_exe_hack[0] == '?') {
-      long fileoff, cmdoff, cmdlen;
+#else
+      long fileoff, cmdoff, cmdlen, need, got;
       int fd;
-      fileoff = get_segment_offset();
+      fileoff = get_segment_offset(self_exe);
 
       p = (unsigned char *)scheme_cmdline_exe_hack + 4;
       cmdoff = (p[0]
@@ -405,14 +412,52 @@ static void extract_built_in_arguments(char **_prog, char **_sprog, int *_argc, 
                 + (((long)p[6]) << 16)
                 + (((long)p[7]) << 24));
       p = malloc(cmdlen);
-      
-      fd = open(_dyld_get_image_name(0), O_RDONLY);
+
+      fd = open(self_exe, O_RDONLY);
       lseek(fd, fileoff + cmdoff, 0);
-      read(fd, p, cmdlen);
+
+      for (need = cmdlen; need > 0; need -= got) {
+	got = read(fd, p + (cmdlen - need), need);
+	if (got == -1) {
+	  got = 0;
+	  if (errno != EINTR)
+	    break;
+	}
+      }
       close(fd);
-    }
+
+      if (scheme_cmdline_exe_hack[0] == '*') {
+        /* "*" means that the first item is argv[0] replacement,
+           because this executable is being treated as a launcher */
+        sprog = prog;
+        prog = (char *)p + 4;
+        
+        if (prog[0] == '/') {
+          /* Absolute path */
+        } else {
+          /* Make it absolute, relative to this executable */
+          int plen = strlen(prog);
+          int mlen = strlen(self_exe);
+          char *s2;
+
+          while (mlen && (self_exe[mlen - 1] != '/')) {
+            mlen--;
+          }
+          s2 = (char *)malloc(mlen + plen + 1);
+          memcpy(s2, self_exe, mlen);
+          memcpy(s2 + mlen, prog, plen + 1);
+          prog = s2;
+        }
+
+        p += (p[0]
+              + (((long)p[1]) << 8)
+              + (((long)p[2]) << 16)
+              + (((long)p[3]) << 24)
+              + 4);
+      }
 #endif
-     
+    }
+
     if (!p)
       p = (unsigned char *)scheme_cmdline_exe_hack + 1;
 
@@ -465,7 +510,3 @@ static char *extract_configdir()
 {
   return scheme_configdir XFORM_OK_PLUS _configdir_offset;
 }
-
-#if !defined(OS_X) && !defined(DOS_FILE_SYSTEM)
-# define NO_GET_SEGMENT_OFFSET
-#endif

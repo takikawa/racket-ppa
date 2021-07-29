@@ -73,6 +73,12 @@
 (define-cairo cairo_quartz_surface_get_cg_context
   (_cfun _cairo_surface_t -> (_or-null _CGContextRef))
   #:make-fail make-not-available)
+(define-cairo cairo_quartz_get_cg_context_with_clip
+  (_cfun _cairo_t -> (_or-null _CGContextRef))
+  #:make-fail make-not-available)
+(define-cairo cairo_quartz_finish_cg_context_with_clip
+  (_cfun _cairo_t -> _void)
+  #:make-fail make-not-available)
 
 (define-cairo cairo_win32_surface_create
   (_cfun _pointer -> _cairo_surface_t)
@@ -414,7 +420,23 @@
   
   CAIRO_OPERATOR_XOR
   CAIRO_OPERATOR_ADD
-  CAIRO_OPERATOR_SATURATE)
+  CAIRO_OPERATOR_SATURATE
+
+  CAIRO_OPERATOR_MULTIPLY
+  CAIRO_OPERATOR_SCREEN
+  CAIRO_OPERATOR_OVERLAY
+  CAIRO_OPERATOR_DARKEN
+  CAIRO_OPERATOR_LIGHTEN
+  CAIRO_OPERATOR_COLOR_DODGE
+  CAIRO_OPERATOR_COLOR_BURN
+  CAIRO_OPERATOR_HARD_LIGHT
+  CAIRO_OPERATOR_SOFT_LIGHT
+  CAIRO_OPERATOR_DIFFERENCE
+  CAIRO_OPERATOR_EXCLUSION
+  CAIRO_OPERATOR_HSL_HUE
+  CAIRO_OPERATOR_HSL_SATURATION
+  CAIRO_OPERATOR_HSL_COLOR
+  CAIRO_OPERATOR_HSL_LUMINOSITY)
 
 (define-enum
   0

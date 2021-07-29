@@ -140,7 +140,6 @@ NOT_MINGW=""
 CONFIGURE_RACKET_SO_COMPILE=""
 COMPRESS_COMP=""
 BOOT_COMPRESS_COMP=""
-ELF_COMP=""
 POST_LINKER="echo"
 
 FRAMEWORK_INSTALL_DIR='$(libpltdir)'
@@ -151,7 +150,7 @@ BOOTFILE_RACKET='$(RACKET)'
 RUN_RACKET='$(RUN_THIS_RACKET)'
 SETUP_BOOT_MODE=--boot
 
-INSTALL_SETUP_FLAGS=
+INSTALL_SETUP_FLAGS="--no-user"
 INSTALL_SETUP_RACKET_FLAGS=
 
 Z_LIB_DEP='$(OWN_Z_LIB)'
@@ -170,6 +169,8 @@ enable_pthread_by_default=yes
 compress_boot_files_by_default=no
 
 cs_auto_flags=--disable-auto-flags
+
+COPY_NEW_CFLAGS_TO_CPPFLAGS=no
 
 ###### Autoconfigure #######
 
@@ -200,7 +201,6 @@ if test "$ARFLAGS" = '' ; then
   ARFLAGS=rc
 fi
 
-
 WINDRES=windres
 
 ############## platform tests ################
@@ -218,7 +218,6 @@ case "$host_os" in
     LIBS="$LIBS -lsocket -lnsl -lintl"
     use_flag_pthread="no"
     use_flag_posix_pthread="yes"
-    enable_strip=no
     ;;
   aix*)
     ;;
@@ -227,30 +226,29 @@ case "$host_os" in
     CFLAGS="${CFLAGS} -I/usr/local/include"
     LDFLAGS="${LDFLAGS} -L/usr/local/lib"
     LIBS="${LIBS} -lm -lpthread"
+    LINK_DYNAMIC="-rdynamic"
     add_iconv_lib="-liconv"
-    CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
-    ELF_COMP="--expect-elf"
     ;;
   openbsd*)
     MACH_OS=ob
     CFLAGS="${CFLAGS} -I/usr/local/include"
     LDFLAGS="${LDFLAGS} -L/usr/local/lib"
     LIBS="${LIBS} -lm -lpthread"
+    LINK_DYNAMIC="-Wl,--export-dynamic"
     add_iconv_lib="-liconv"
     LDFLAGS="${LDFLAGS} -Wl,-zwxneeded"
-    CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
-    ELF_COMP="--expect-elf"
     ;;
   bitrig*)
+    LINK_DYNAMIC="-Wl,--export-dynamic"
     ;;
   dragonfly*)
+    LINK_DYNAMIC="-Wl,--export-dynamic"
     ;;
   netbsd*)
     MACH_OS=nb
     LIBS="${LIBS} -lm -lpthread"
+    LINK_DYNAMIC="-rdynamic"
     add_iconv_lib="/usr/lib/i18n/libiconv_std.a"
-    CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
-    ELF_COMP="--expect-elf"
     POST_LINKER="paxctl +m"
     ;;
   irix*)
@@ -264,8 +262,7 @@ case "$host_os" in
         LIBS="${LIBS} -lrt"
         ;;
     esac
-    CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
-    ELF_COMP="--expect-elf"
+    LINK_DYNAMIC="-rdynamic"
     ;;
   osf1*)
     ;;
@@ -375,10 +372,20 @@ case "$MACH_HOST_CPU" in
   arm*)
     MACH="${thread_prefix}arm32${MACH_OS}"
     ;;
+  powerpc64*)
+    MACH=""
+    # MACH="${thread_prefix}ppc64${MACH_OS}"
+    ;;
   power*)
     MACH="${thread_prefix}ppc32${MACH_OS}"
     ;;
 esac
+
+if test "$MACH" = "" -o "$MACH_OS" = "" ; then
+   echo "Platform is not supported by Racket CS."
+   echo 'Try `--enable-bcdefault`, instead.'
+   exit 1
+fi
 
 if test "${enable_mach}" != "" ; then
   MACH="${enable_mach}"
@@ -432,8 +439,15 @@ elif test "${build_os}_${build_cpu}" != "${host_os}_${host_cpu}" ; then
     arm*)
       BUILD_MACH="${BUILD_THREAD_PREFIX}arm32${BUILD_OS}"
       ;;
+    powerpc64*)
+      BUILD_MACH="${BUILD_THREAD_PREFIX}ppc64${BUILD_OS}"
+      ;;
     power*)
       BUILD_MACH="${BUILD_THREAD_PREFIX}ppc32${BUILD_OS}"
+      ;;
+    *)
+      echo "unknown build CPU"
+      exit 1
       ;;
   esac
   TARGET_MACH=${MACH}
@@ -756,6 +770,7 @@ AC_SUBST(CPPFLAGS)
 AC_SUBST(LD)
 AC_SUBST(LDFLAGS)
 AC_SUBST(LIBS)
+AC_SUBST(LINK_DYNAMIC)
 AC_SUBST(AR)
 AC_SUBST(ARFLAGS)
 AC_SUBST(RANLIB)
@@ -795,7 +810,6 @@ AC_SUBST(LZ4_LIB_UNPACK)
 AC_SUBST(CONFIGURE_RACKET_SO_COMPILE)
 AC_SUBST(COMPRESS_COMP)
 AC_SUBST(BOOT_COMPRESS_COMP)
-AC_SUBST(ELF_COMP)
 AC_SUBST(MAKE_BUILD_SCHEME)
 AC_SUBST(SCHEME_CONFIG_ARGS)
 AC_SUBST(SCHEME_CROSS_CONFIG_ARGS)

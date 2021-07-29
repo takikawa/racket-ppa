@@ -60,7 +60,7 @@ disablecurses=no
 disableiconv=no
 addflags=yes
 addwarningflags=no
-default_warning_flags="-Wpointer-arith -Wall -Wextra -Werror -Wno-implicit-fallthrough"
+default_warning_flags="-Wpointer-arith -Wall -Wextra -Wno-implicit-fallthrough"
 : ${CC:="gcc"}
 : ${CPPFLAGS:=""}
 : ${CFLAGS:=""}
@@ -94,22 +94,7 @@ fi
 
 case "${CONFIG_UNAME}" in
   Linux)
-    if uname -a | egrep 'i386|i686|amd64|athlon|x86_64' > /dev/null 2>&1 ; then
-      m32=i3le
-      m64=a6le
-      tm32=ti3le
-      tm64=ta6le
-    elif uname -a | grep -i power > /dev/null 2>&1 ; then
-      m32=ppc32le
-      m64=""
-      tm32=tppc32le
-      tm64=""
-    elif uname -a | egrep 'armv|aarch64' > /dev/null 2>&1 ; then
-      m32=arm32le
-      m64=arm64le
-      tm32=tarm32le
-      tm64=tarm64le
-    fi
+    unixsuffix=le
     installprefix=/usr
     installmansuffix=share/man
     ;;
@@ -122,32 +107,17 @@ case "${CONFIG_UNAME}" in
     installmansuffix=man
     ;;
   FreeBSD)
-    if uname -a | egrep 'i386|i686|amd64|athlon|x86_64' > /dev/null 2>&1 ; then
-      m32=i3fb
-      m64=a6fb
-      tm32=ti3fb
-      tm64=ta6fb
-    fi
+    unixsuffix=fb
     installprefix=/usr/local
     installmansuffix=man
     ;;
   OpenBSD)
-    if uname -a | egrep 'i386|i686|amd64|athlon|x86_64' > /dev/null 2>&1 ; then
-      m32=i3ob
-      m64=a6ob
-      tm32=ti3ob
-      tm64=ta6ob
-    fi
+    unixsuffix=ob
     installprefix=/usr/local
     installmansuffix=man
     ;;
   NetBSD)
-    if uname -a | egrep 'i386|i686|amd64|athlon|x86_64' > /dev/null 2>&1 ; then
-      m32=i3nb
-      m64=a6nb
-      tm32=ti3nb
-      tm64=ta6nb
-    fi
+    unixsuffix=nb
     installprefix=/usr
     installmansuffix=share/man
     gzipmanpages=no
@@ -191,6 +161,23 @@ case "${CONFIG_UNAME}" in
     fi
     ;;
 esac
+
+if [ "$unixsuffix" != "" ] ; then
+    if uname -a | egrep 'i386|i686|amd64|athlon|x86_64' > /dev/null 2>&1 ; then
+        m32=i3${unixsuffix}
+        m64=a6${unixsuffix}
+        tm32=ti3${unixsuffix}
+        tm64=ta6${unixsuffix}
+    elif uname -a | egrep 'power|ppc' > /dev/null 2>&1 ; then
+        m32=ppc32${unixsuffix}
+        tm32=tppc32${unixsuffix}
+    elif uname -a | egrep 'armv|aarch64' > /dev/null 2>&1 ; then
+        m32=arm32${unixsuffix}
+        m64=arm64${unixsuffix}
+        tm32=tarm32${unixsuffix}
+        tm64=tarm64${unixsuffix}
+    fi
+fi
 
 threads=""
 bits=""
@@ -360,7 +347,7 @@ if [ "$m" = "pb" ] ; then
 fi
 
 if [ "$bits" = "" ] ; then
-  if uname -a | egrep 'amd64|x86_64|aarch64|arm64' > /dev/null 2>&1 ; then
+  if uname -a | egrep 'amd64|x86_64|aarch64|arm64|ppc64|powerpc64' > /dev/null 2>&1 ; then
     bits=64
   else
     bits=32
@@ -383,6 +370,16 @@ if [ "$m" = "" ] ; then
      m=pb
      if [ $bits = 64 ] ; then mpbhost=$m64 ; else mpbhost=$m32 ; fi
      flagsm=$mpbhost
+     if [ "$mpbhost" = "" ] ; then
+         echo "Could not infer current machine type."
+         echo ""
+         echo "Event for a pb build, a machine type is needed to select C compiler"
+         echo "and linker flags. You can use"
+         echo "  $0 --pb -m=<machine type>"
+         echo "to specify the available machine type, but since it wasn't inferred,"
+         echo "probably your OS and architecture combination is not supported."
+         exit 1
+     fi
   else      
     m=$defaultm
     flagsm=$m
@@ -500,60 +497,79 @@ case "${flagsm}" in
       ;;
 esac
 
+flagsmuni=`echo $flagsm | sed -e 's/^t//'`
+muni=`echo $m | sed -e 's/^t//'`
+
 # Set default CFLAGS if not provided at all. Assuming that the
 # compiler is for the right platform, compilation should generally
 # succeed if no flags are set; anything required should be propagated
 # a different way
 if [ "$cflagsset" = "no" ] ; then
-  case "${flagsm}" in
-    a6le|ta6le)
+  case "${flagsmuni}" in
+    a6le)
         CFLAGS="-m64 -msse2 ${optFlags}"
         ;;
-    a6fb|ta6fb|a6nb|ta6nb|a6ob|ta6ob)
-        CFLAGS="-m64 ${optFlags}"
-        ;;
-    a6s2|ta6s2)
-        CFLAGS="-m64 ${optFlags}"
-        ;;
-    a6osx|ta6osx)
-        CFLAGS="-m64 ${optFlags}"
-        ;;
-    arm64osx|tarm64osx)
-        CFLAGS="-arch arm64 ${optFlags}"
-        ;;
-    a6nt|ta6nt)
+    a6nt)
         CFLAGS="${optFlags}"
         ;;
-    arm32le|tarm32le|arm64le|tarm64le)
-        CFLAGS="${optFlags}"
+    a6*)
+        CFLAGS="-m64 ${optFlags}"
         ;;
-    i3le|ti3le)
+    i3le)
         CFLAGS="-m32 -msse2 ${optFlags}"
         ;;
-    i3fb|ti3fb|i3nb|ti3nb|i3ob|ti3ob)
-        CFLAGS="-m32 ${optFlags}"
-        ;;
-    i3s2|ti3s2)
-        CFLAGS="-m32 ${optFlags}"
-        ;;
-    i3osx|ti3osx)
-        CFLAGS="-m32 ${optFlags}"
-        ;;
-    i3nt|ti3nt)
+    i3nt)
         CFLAGS="${optFlags}"
         ;;
     i3qnx)
         CC=qcc
         CFLAGS="-m32 -N2048K ${optFlags}"
         ;;
-    ppc32le|tppc32le)
+    i3*)
         CFLAGS="-m32 ${optFlags}"
         ;;
-    ppc32osx|tppc32osx)
+    arm32*)
+        CFLAGS="-m32 ${optFlags}"
+        ;;
+    arm64osx)
+        CFLAGS="-arch arm64 ${optFlags}"
+        ;;
+    ppc32osx)
         CFLAGS="${optFlags}"
+        ;;
+    ppc32*)
+        CFLAGS="-m32 ${optFlags}"
         ;;
   esac
 fi
+
+# architecture-specific for Mf-unix
+case "${muni}" in
+  pb)
+      Cpu=PORTABLE_BYTECODE
+      mdarchsrc=pb
+      ;;
+  a6*)
+      Cpu=X86_64
+      mdarchsrc=i3le
+      ;;
+  i3*)
+      Cpu=I386
+      mdarchsrc=i3le
+      ;;
+  arm32*)
+      Cpu=ARMV6
+      mdarchsrc=arm32le
+      ;;
+  arm64*)
+      Cpu=AARCH64
+      mdarchsrc=arm32le
+      ;;
+  ppc32*)
+      Cpu=PPC32
+      mdarchsrc=ppc32
+      ;;
+esac
 
 # Add automatic thread compilation flags, unless suppressed by --disable-auto-flags
 if [ "$addflags" = "yes" ] ; then
@@ -627,6 +643,84 @@ if [ "$addflags" = "yes" ] ; then
   fi
 fi
 
+# more compile and link flags for c/Mf-unix and mats/Mf-unix
+mdinclude=
+mdcppflags=
+mdcflags=
+mdldflags=
+mdlinkflags= 
+zlibConfigureFlags=
+exePostStep=":"
+
+# compile flags for c/Mf-unix and mats/Mf-unix
+case "${flagsmuni}" in
+    *le)
+        mdcflags="-fPIC -shared"
+        ;;
+    *fb|*ob)
+        mdcflags="-fPIC -shared"
+        mdinclude="-I/usr/local/include -I/usr/X11R6/include"
+        ;;
+    *nb)
+        mdcflags="-fPIC -shared"
+        mdinclude="-I/usr/X11R7/include -I/usr/pkg/include -I/usr/pkg/include/ncurses -I/usr/X11R6/include"
+        ;;
+    *osx)
+        mdcflags="-dynamiclib -undefined dynamic_lookup"
+        ;;
+    *s2)
+        mdcflags="-fPIC -shared"
+        mdcppflags="-DSOLARIS"
+        ;;
+    *qnx)
+        mdcflags="-fPIC -shared"
+        mdinclude="-I/usr/local/include"
+        ;;
+esac
+
+# dynamic linking flags for c/Mf-unix
+case "${flagsmuni}" in
+    a6le)
+        mdldflags="-melf_x86_64"
+        ;;
+    i3le)
+        mdldflags="-melf_i386"
+        ;;
+    *le)
+        ;;
+    i3nb)
+        mdldflags="-m elf_i386"
+        ;;
+    *fb|*ob|*nb)
+        ;;
+    *osx)
+        ;;
+    a6s2)
+        mdldflags="-melf_x86_64"
+        ;;
+    i3s2)
+        mdldflags="-melf_i386"
+        ;;
+    i3qnx)
+        mdlinkflags="-Wl,--export-dynamic"
+        mdldflags="-mi386nto"
+        ;;
+esac
+
+# post-link-executable step for c/Mf-unix
+case "${flagsmuni}" in
+    *nb)
+        exePostStep='paxctl +m ${Scheme}'
+        ;;
+esac
+
+# zlib configure flags for c/Mf-unix
+case "${flagsmuni}" in
+    a6*)
+        zlibConfigureFlags="--64"
+        ;;
+esac
+
 if [ -f boot/$m/scheme.boot -o -f "$srcdir"/boot/$m/scheme.boot ] ; then
   echo "Configuring for $m"
 else
@@ -681,7 +775,12 @@ case "$srcdir" in
         ;;
 esac
 
-"$srcdir"/workarea $m $w $mpbhost
+if "$srcdir"/workarea $m $w $mpbhost ; then
+    :
+else
+    # not a recognized host, or other error
+    exit 1
+fi
 
 sed -e 's/$(m)/'$m'/g'\
     -e 's/$(defaultm)/'$defaultm'/g'\
@@ -754,6 +853,15 @@ esac
 
 cat > $w/c/Mf-config << END
 upupsrcdir=$upupsrcdir
+m=$m
+Cpu=$Cpu
+mdarchsrc=$mdarchsrc
+mdinclude=$mdinclude
+mdcppflags=$mdcppflags
+mdldflags=$mdldflags
+mdlinkflags=$mdlinkflags
+exePostStep=$exePostStep
+zlibConfigureFlags=
 CC=$CC
 CPPFLAGS=$CPPFLAGS
 CFLAGS=$CFLAGS
@@ -780,4 +888,13 @@ Kernel=\${${Kernel}}
 KernelLinkDeps=\${${Kernel}LinkDeps}
 KernelLinkLibs=\${${Kernel}LinkLibs}
 C=\${CC} \${CPPFLAGS} \${CFLAGS} \${warningFlags}
+END
+
+cat > $w/mats/Mf-config << END
+upupsrcdir=$upupsrcdir
+m=$m
+mdcflags=$mdcflags
+CC=$CC
+CPPFLAGS=$CPPFLAGS
+CFLAGS=$CFLAGS
 END

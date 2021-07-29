@@ -15,6 +15,7 @@ Sforeign_symbol("rktio_fd_is_text_converted", (void *)rktio_fd_is_text_converted
 Sforeign_symbol("rktio_fd_is_pending_open", (void *)rktio_fd_is_pending_open);
 Sforeign_symbol("rktio_fd_modes", (void *)rktio_fd_modes);
 Sforeign_symbol("rktio_open", (void *)rktio_open);
+Sforeign_symbol("rktio_open_with_create_permissions", (void *)rktio_open_with_create_permissions);
 Sforeign_symbol("rktio_close", (void *)rktio_close);
 Sforeign_symbol("rktio_close_noerr", (void *)rktio_close_noerr);
 Sforeign_symbol("rktio_dup", (void *)rktio_dup);
@@ -169,6 +170,7 @@ Sforeign_symbol("rktio_poll_os_signal", (void *)rktio_poll_os_signal);
 Sforeign_symbol("rktio_will_modify_os_signal_handler", (void *)rktio_will_modify_os_signal_handler);
 Sforeign_symbol("rktio_get_milliseconds", (void *)rktio_get_milliseconds);
 Sforeign_symbol("rktio_get_inexact_milliseconds", (void *)rktio_get_inexact_milliseconds);
+Sforeign_symbol("rktio_get_inexact_monotonic_milliseconds", (void *)rktio_get_inexact_monotonic_milliseconds);
 Sforeign_symbol("rktio_get_process_milliseconds", (void *)rktio_get_process_milliseconds);
 Sforeign_symbol("rktio_get_process_children_milliseconds", (void *)rktio_get_process_children_milliseconds);
 Sforeign_symbol("rktio_get_seconds", (void *)rktio_get_seconds);

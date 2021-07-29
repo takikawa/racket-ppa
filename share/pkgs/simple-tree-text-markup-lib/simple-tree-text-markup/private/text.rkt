@@ -79,11 +79,84 @@
     ((framed-markup? markup)
      (block-box (markup->block (framed-markup-markup markup))))
     ((image-markup? markup)
-     (markup->block (image-markup-alt-markup markup)))))
+     (markup->block (image-markup-alt-markup markup)))
+    ((number-markup? markup)
+     (list (number-markup->string (number-markup-number markup)
+                                  #:exact-prefix (number-markup-exact-prefix markup)
+                                  #:inexact-prefix (number-markup-inexact-prefix markup)
+                                  #:fraction-view (number-markup-fraction-view markup))))))
+
+(define (number-markup->string number
+                               #:exact-prefix [exact-prefix 'never]
+                               #:inexact-prefix [inexact-prefix 'never]
+                               #:fraction-view [fraction-view #f])
+  (cond
+    [(inexact? number)
+     (string-append
+      (if (eq? inexact-prefix 'always) "#i" "")
+      (number->decimal-string number ""))]
+    [(eq? fraction-view 'decimal)
+     (string-append
+      (if (eq? exact-prefix 'always) "#e" "")
+      (number->decimal-string number (if (eq? exact-prefix 'when-necessary) "#e" "")))]
+    [else
+     (string-append
+      (if (eq? exact-prefix 'always) "#e" "")
+      (number->string number))]))
+
+;; stolen from racket/pretty, but can't use because we're sitting inside a pretty-print-print-hook probably
+(define (number->decimal-string x exact-prefix)
+  (cond
+    [(or (inexact? x)
+         (integer? x))
+     (number->string x)]
+    [(not (real? x))
+     (let ([r (real-part x)]
+           [i (imag-part x)])
+       (format "~a~a~ai"
+               (number->decimal-string r "")
+               (if (negative? i)
+                   ""
+                   "+")
+               (number->decimal-string i "")))]
+    [else
+     (let ([n (numerator x)]
+           [d (denominator x)])
+       ;; Count powers of 2 in denomintor
+       (let loop ([v d][2-power 0])
+         (if (and (positive? v)
+                  (even? v))
+             (loop (arithmetic-shift v -1) (add1 2-power))
+             ;; Count powers of 5 in denominator
+             (let loop ([v v][5-power 0])
+               (if (zero? (remainder v 5))
+                   (loop (quotient v 5) (add1 5-power))
+                   ;; No more 2s or 5s. Anything left?
+                   (if (= v 1)
+                       ;; Denominator = (* (expt 2 2-power) (expt 5 5-power)).
+                       ;; Print number as decimal.
+                       (let* ([10-power (max 2-power 5-power)]
+                              [scale (* (expt 2 (- 10-power 2-power))
+                                        (expt 5 (- 10-power 5-power)))]
+                              [s (number->string (* (abs n) scale))]
+                              [orig-len (string-length s)]
+                              [len (max (add1 10-power) orig-len)]
+                              [padded-s (if (< orig-len len)
+                                            (string-append
+                                             (make-string (- len orig-len) #\0)
+                                             s)
+                                            s)])
+                         (format "~a~a~a.~a"
+                                 exact-prefix
+                                 (if (negative? n) "-" "")
+                                 (substring padded-s 0 (- len 10-power))
+                                 (substring padded-s (- len 10-power) len)))
+                       ;; d has factor(s) other than 2 and 5.
+                       ;; Print as a fraction.
+                       (number->string x)))))))]))
 
 (define display-markup
   (case-lambda
     ((markup) (display-markup markup (current-output-port)))
     ((markup port)
      (block-display port (markup->block markup)))))
-

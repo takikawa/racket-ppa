@@ -91,8 +91,9 @@ Thread and signal conventions:
 #define RKTIO_EXTERN_NOERR  RKTIO_EXTERN
 #define RKTIO_EXTERN_STEP   RKTIO_EXTERN
 
-#define RKTIO_NULLABLE      /* empty */
-#define RKTIO_BLOCKING      /* empty */
+#define RKTIO_NULLABLE      /* empty; pointer type can be NULL */
+#define RKTIO_BLOCKING      /* empty; function blocks indefinitely */
+#define RKTIO_MSG_QUEUE     /* empty; function can dispatch events on Windows */
 
 /*************************************************/
 /* Initialization and general datatypes          */
@@ -226,6 +227,16 @@ RKTIO_EXTERN rktio_fd_t *rktio_open(rktio_t *rktio, rktio_const_string_t src, in
    `RKTIO_ERROR_UNSUPPORTED_TEXT_MODE`. If `modes` has `RKTIO_OPEN_WRITE`
    without `RKTIO_OPEN_READ`, then the result may be a file descriptor
    in pending-open mode until the read end is opened. */
+
+RKTIO_EXTERN rktio_fd_t *rktio_open_with_create_permissions(rktio_t *rktio,
+                                                            rktio_const_string_t src,
+                                                            int modes, int perm_bits);
+/* Like `rktio_open`, but accepts permission bits that are used if the
+   file is created (which is only relevant if `modes` includes
+   `RKTIO_OPEN_WRITE`). On Unix, perm_bits are adjusted by a umask.
+   Otherwise, permission bits are treated in the same way as
+   by `rktio_set_file_or_directory_permissions`. */
+#define RKTIO_DEFAULT_PERM_BITS 0666
 
 RKTIO_EXTERN rktio_ok_t rktio_close(rktio_t *rktio, rktio_fd_t *fd);
 /* Can report `RKTIO_ERROR_EXISTS` in place of system error,
@@ -1052,16 +1063,21 @@ typedef struct rktio_date_t {
 } rktio_date_t;
 
 RKTIO_EXTERN_NOERR uintptr_t rktio_get_milliseconds(void);
-/* Overflow may cause the result to wrap around to 0, at least on a
-   32-bit platform. */
+/* Wll-clock time. Overflow may cause the result to wrap around to 0,
+   at least on a 32-bit platform. */
 
 RKTIO_EXTERN_NOERR double rktio_get_inexact_milliseconds(void);
-/* No overflow, but won't strictly increase if the system clock is reset. */
+/* Wall-clock time. No overflow, but won't strictly increase if the
+   system clock is reset. */
+
+RKTIO_EXTERN_NOERR double rktio_get_inexact_monotonic_milliseconds(rktio_t *rktio);
+/* Real time like wall-clock time, but will strictly increase,
+   assuming that the host system provides a monotonic clock. */
 
 RKTIO_EXTERN_NOERR uintptr_t rktio_get_process_milliseconds(rktio_t *rktio);
 RKTIO_EXTERN_NOERR uintptr_t rktio_get_process_children_milliseconds(rktio_t *rktio);
-/* Overflow may cause the result to wrap around to 0, at least on a
-   32-bit platform. */
+/* CPU time across all threads withing the process. Overflow may cause
+   the result to wrap around to 0, at least on a 32-bit platform. */
 
 RKTIO_EXTERN_NOERR rktio_timestamp_t rktio_get_seconds(rktio_t *rktio);
 RKTIO_EXTERN rktio_date_t *rktio_seconds_to_date(rktio_t *rktio, rktio_timestamp_t seconds, int nanoseconds, int get_gmt);
@@ -1085,12 +1101,12 @@ enum {
   RKTIO_SW_SHOWNORMAL
 };
 
-RKTIO_EXTERN rktio_ok_t rktio_shell_execute(rktio_t *rktio,
-                                            rktio_const_string_t verb,
-                                            rktio_const_string_t target,
-                                            rktio_const_string_t arg,
-                                            rktio_const_string_t dir,
-                                            int show_mode);
+RKTIO_EXTERN RKTIO_MSG_QUEUE rktio_ok_t rktio_shell_execute(rktio_t *rktio,
+                                                            rktio_const_string_t verb,
+                                                            rktio_const_string_t target,
+                                                            rktio_const_string_t arg,
+                                                            rktio_const_string_t dir,
+                                                            int show_mode);
 /* Supported only on Windows to run `ShellExecute`. The `dir` argument
    needs to have normalized path separators. */
 

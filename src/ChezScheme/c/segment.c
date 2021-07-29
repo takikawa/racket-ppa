@@ -46,7 +46,7 @@ static seginfo *sort_seginfo PROTO((seginfo *si, uptr n));
 static seginfo *merge_seginfo PROTO((seginfo *si1, seginfo *si2));
 
 #if defined(WRITE_XOR_EXECUTE_CODE)
-static void enable_code_write PROTO((ptr tc, IGEN maxg, IBOOL on, IBOOL current, ptr hint));
+static void enable_code_write PROTO((ptr tc, IGEN maxg, IBOOL on, IBOOL current, void *hint, uptr hint_len));
 #endif
 
 void S_segment_init() {
@@ -85,6 +85,15 @@ static void out_of_memory(void) {
   (void) fprintf(stderr,"out of memory\n");
   S_abnormal_exit();
 }
+
+#if defined(USE_MMAP)
+static int for_code_succeeded = 0;
+static void w_and_x_problem(void) {
+  (void) fprintf(stderr,
+                 "allocation failed for code; maybe write+execute permission is not allowed\n");
+  S_abnormal_exit();
+}
+#endif
 
 #if defined(USE_MALLOC)
 void *S_getmem(iptr bytes, IBOOL zerofill, UNUSED IBOOL for_code) {
@@ -163,12 +172,15 @@ void *S_getmem(iptr bytes, IBOOL zerofill, IBOOL for_code) {
     if ((addr = mmap(NULL, p_bytes, perm, flags|MAP_32BIT, -1, 0)) == (void *)-1) {
 #endif
       if ((addr = mmap(NULL, p_bytes, perm, flags, -1, 0)) == (void *)-1) {
+        if (for_code && !for_code_succeeded)
+          w_and_x_problem();
         out_of_memory();
         debug(printf("getmem mmap(%p) -> %p\n", TO_VOIDP(bytes), addr))
       }
 #ifdef MAP_32BIT
     }
 #endif
+    if (for_code) for_code_succeeded = 1;
     if ((membytes += p_bytes) > maxmembytes) maxmembytes = membytes;
     debug(printf("getmem mmap(%p => %p) -> %p\n", TO_VOIDP(bytes), TO_VOIDP(p_bytes), addr))
   }
@@ -586,17 +598,19 @@ static void contract_segment_table(uptr base, uptr end) {
    being flipped while a thread is executing code off of it.
 */
 
-void S_thread_start_code_write(WX_UNUSED ptr tc, WX_UNUSED IGEN maxg, WX_UNUSED IBOOL current, WX_UNUSED void *hint) {
+void S_thread_start_code_write(WX_UNUSED ptr tc, WX_UNUSED IGEN maxg, WX_UNUSED IBOOL current,
+                               WX_UNUSED void *hint, WX_UNUSED uptr hint_len) {
 #if defined(WRITE_XOR_EXECUTE_CODE)
-  enable_code_write(tc, maxg, 1, current, hint);
+  enable_code_write(tc, maxg, 1, current, hint, hint_len);
 #else
   S_ENABLE_CODE_WRITE(1);
 #endif
 }
 
-void S_thread_end_code_write(WX_UNUSED ptr tc, WX_UNUSED IGEN maxg, WX_UNUSED IBOOL current, WX_UNUSED void *hint) {
+void S_thread_end_code_write(WX_UNUSED ptr tc, WX_UNUSED IGEN maxg, WX_UNUSED IBOOL current,
+                             WX_UNUSED void *hint, WX_UNUSED uptr hint_len) {
 #if defined(WRITE_XOR_EXECUTE_CODE)
-  enable_code_write(tc, maxg, 0, current, hint);
+  enable_code_write(tc, maxg, 0, current, hint, hint_len);
 #else
   S_ENABLE_CODE_WRITE(0);
 #endif
@@ -623,19 +637,24 @@ static IBOOL is_unused_seg(chunkinfo *chunk, seginfo *si) {
 }
 # endif
 
-static void enable_code_write(ptr tc, IGEN maxg, IBOOL on, IBOOL current, void *hint) {
+static void enable_code_write(ptr tc, IGEN maxg, IBOOL on, IBOOL current, void *hint, uptr hint_len) {
   thread_gc *tgc;
   chunkinfo *chunk;
-  seginfo si, *sip;
-  iptr i, j, bytes;
+  seginfo *sip;
+  iptr i, bytes;
   void *addr;
   INT flags = (on ? PROT_WRITE : PROT_EXEC) | PROT_READ;
 
   /* Flip only the segment hinted at by the caller. */
   if (maxg == 0 && hint != NULL) {
-    addr = TO_VOIDP((char*)hint - ((uptr)hint % bytes_per_segment));
-    if (mprotect(addr, bytes_per_segment, flags) != 0) {
-      S_error_abort("bad hint to enable_code_write");
+    uptr seg, start_seg, end_seg;
+    start_seg = addr_get_segment(TO_PTR(hint));
+    end_seg = addr_get_segment((uptr)TO_PTR(hint) + hint_len - 1);
+    for (seg = start_seg; seg <= end_seg; seg++) {
+      addr = TO_VOIDP(build_ptr(seg, 0));
+      if (mprotect(addr, bytes_per_segment, flags) != 0) {
+        S_error_abort("bad hint to enable_code_write");
+      }
     }
     return;
   }
@@ -643,11 +662,12 @@ static void enable_code_write(ptr tc, IGEN maxg, IBOOL on, IBOOL current, void *
   /* Flip only the current allocation segments. */
   tgc = THREAD_GC(tc);
   if (maxg == 0 && current) {
-    addr = tgc->base_loc[0][space_code];
+    addr = TO_VOIDP(tgc->base_loc[0][space_code]);
     if (addr == NULL) {
       return;
     }
-    bytes = (char*)tgc->next_loc[0][space_code] - (char*)tgc->base_loc[0][space_code] + tgc->bytes_left[0][space_code] + ptr_bytes;
+    bytes = ((char*)tgc->next_loc[0][space_code] - (char*)tgc->base_loc[0][space_code]
+             + tgc->bytes_left[0][space_code] + allocation_segment_tail_padding);
     if (mprotect(addr, bytes, flags) != 0) {
       S_error_abort("failed to protect current allocation segments");
     }
@@ -658,7 +678,7 @@ static void enable_code_write(ptr tc, IGEN maxg, IBOOL on, IBOOL current, void *
     if (!on) {
       while ((sip = tgc->sweep_next[0][space_code]) != NULL) {
         tgc->sweep_next[0][space_code] = sip->sweep_next;
-        addr = sip->sweep_start;
+        addr = TO_VOIDP(sip->sweep_start);
         bytes = sip->sweep_bytes;
         if (mprotect(addr, bytes, flags) != 0) {
           S_error_abort("failed to protect recent allocation segments");
@@ -681,8 +701,9 @@ static void enable_code_write(ptr tc, IGEN maxg, IBOOL on, IBOOL current, void *
       } else {
         /* Flip bits for whole runs of segs that are either unused or
            whose generation is within the range [0, maxg]. */
+        int j;
         for (j = 0; j < chunk->segs; j++) {
-          si = chunk->sis[j];
+          seginfo si = chunk->sis[j];
           /* When maxg is 0, limit the search to unused segments and
              segments that belong to the current thread. */
           if ((maxg == 0 && si.generation == 0 && si.creator == tgc) ||
