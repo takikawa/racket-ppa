@@ -13,8 +13,11 @@
 
 (define-member-name stepper-button-callback (unique-member-name-key))
 
-(define (stepper-drracket-button language settings)
+; configure is a thunk to configure the runtime settings for printing values
+(define (stepper-drracket-button language settings configure)
   (list 
    (string-constant stepper-button-label)
    x:step-img
-   (λ (drs-frame) (send (send drs-frame get-current-tab) stepper-button-callback language settings))))
+   (λ (drs-frame)
+     (configure)
+     (send (send drs-frame get-current-tab) stepper-button-callback language settings))))

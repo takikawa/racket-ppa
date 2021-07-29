@@ -357,7 +357,7 @@
 ;; ---------------------------------------------------------------------
 ;; Version and machine types:
 
-(define-constant scheme-version #x09050504)
+(define-constant scheme-version #x09050505)
 
 (define-syntax define-machine-types
   (lambda (x)
@@ -396,6 +396,15 @@
   arm64le   tarm64le
   arm64osx  tarm64osx
   ppc32osx  tppc32osx
+  arm32fb   tarm32fb
+  ppc32fb   tppc32fb
+  arm64fb   tarm64fb
+  arm32ob   tarm32ob
+  ppc32ob   tppc32ob
+  arm64ob   tarm64ob
+  arm32nb   tarm32nb
+  ppc32nb   tppc32nb
+  arm64nb   tarm64nb
 )
 
 (include "machine.def")
@@ -731,23 +740,25 @@
       (impure "impure" #\i 1)            ; most mutable objects allocated here (all ptrs)
       (symbol "symbol" #\x 2)            ;
       (port "port" #\q 3)                ;
-      (weakpair "weakpr" #\w 4)          ;
-      (ephemeron "emph" #\e 5)           ;
-      (pure "pure" #\p 6)                ; swept immutable objects allocated here (all ptrs)
-      (continuation "cont" #\k 7)        ;
-      (code "code" #\c 8)                ;
-      (pure-typed-object "p-tobj" #\r 9) ;
-      (impure-record "ip-rec" #\s 10)    ;
-      (impure-typed-object "ip-tobj" #\t 11) ; as needed (instead of impure) for backtraces
-      (closure "closure" #\l 12)         ; as needed (instead of pure/impure) for backtraces
-      (immobile-impure "im-impure" #\I 13) ; like impure, but for immobile objects
-      (count-pure "cnt-pure" #\y 14)     ; like pure, but delayed for counting from roots
-      (count-impure "cnt-impure" #\z 15)); like impure-typed-object, but delayed for counting from roots
+      (pure "pure" #\p 4)                ; swept immutable objects allocated here (all ptrs)
+      (continuation "cont" #\k 5)        ;
+      (code "code" #\c 6)                ;
+      (pure-typed-object "p-tobj" #\r 7) ;
+      (impure-record "ip-rec" #\s 8)     ;
+      (impure-typed-object "ip-tobj" #\t 9) ; as needed (instead of impure) for backtraces
+      (closure "closure" #\l 10)         ; as needed (instead of pure/impure) for backtraces
+      (immobile-impure "im-impure" #\I 11) ; like impure, but for immobile objects
+      (count-pure "cnt-pure" #\y 12)     ; like pure, but delayed for counting from roots
+      (count-impure "cnt-impure" #\z 13) ; like impure-typed-object, but delayed for counting from roots
+      ;; spaces that can hold pairs for sweeping:
+      (weakpair "weakpr" #\w 14)         ; must be ordered as first special space for pairs
+      (ephemeron "emph" #\e 15)          ;
+      (reference-array "ref-array" #\a 16)) ; reference bytevectors
     (unswept
-      (data "data" #\d 16)               ; unswept objects allocated here
-      (immobile-data "im-data" #\D 17))) ; like data, but non-moving
+      (data "data" #\d 17)               ; unswept objects allocated here
+      (immobile-data "im-data" #\D 18))) ; like data, but non-moving
   (unreal
-    (empty "empty" #\e 18)))             ; available segments
+    (empty "empty" #\e 19)))             ; available segments
 
 ;;; enumeration of types for which gc tracks object counts
 ;;; also update gc.c
@@ -797,6 +808,10 @@
 (define-constant type-closure      #b101)
 (define-constant type-immediate    #b110)
 (define-constant type-typed-object #b111)
+
+;; Applying this type tag to an address shouldproduce a pointer
+;; that's equal to the address:
+(define-constant type-untyped      (constant typemod))
 
 ;; ---------------------------------------------------------------------
 ;; Immediate values; note that these all end with `type-immediate`:
@@ -1294,6 +1309,9 @@
            [else x]))])))
 )
 
+;; This is the same as `record-type-disp`, but helps bootstrap:
+(define-constant record-ptr-offset (- (constant typemod) (constant type-record)))
+
 (define-syntax define-primitive-structure-disps
   (lambda (x)
     (include "layout.ss")
@@ -1439,6 +1457,8 @@
      ([iptr type]
       [octet data 0]))])
 
+(define-constant reference-disp (constant bytevector-data-disp))
+
 (define-primitive-structure-disps stencil-vector type-typed-object
   ([iptr type]
    [ptr data 0]))
@@ -1502,7 +1522,7 @@
    [ptr pinfo*]
    [octet data 0]))
 
-(define-primitive-structure-disps reloc-table typemod
+(define-primitive-structure-disps reloc-table type-untyped
   ([iptr size]
    [ptr code]
    [uptr data 0]))
@@ -1529,7 +1549,7 @@
 (define-constant maximum-parallel-collect-threads 16)
 
 ;;; make sure gc sweeps all ptrs
-(define-primitive-structure-disps tc typemod
+(define-primitive-structure-disps tc type-untyped
   ([xptr arg-regs (constant asm-arg-reg-max)]
    [xptr ac0]
    [xptr ac1]
@@ -1669,7 +1689,7 @@
                           (+ b (constant ptr-bytes))
                           (cdr e*)))])))))))
 
-(define-primitive-structure-disps guardian-entry typemod
+(define-primitive-structure-disps guardian-entry type-untyped
   ([ptr obj]
    [ptr rep]
    [ptr tconc]
@@ -1684,15 +1704,15 @@
 ;;; forwarding addresses are recorded with a single forward-marker
 ;;; bit pattern (a special Scheme object) followed by the forwarding
 ;;; address, a ptr to the forwarded object.
-(define-primitive-structure-disps forward typemod
+(define-primitive-structure-disps forward type-untyped
   ([ptr marker]
    [ptr address]))
 
-(define-primitive-structure-disps cached-stack typemod
+(define-primitive-structure-disps cached-stack type-untyped
   ([iptr size]
    [ptr link]))
 
-(define-primitive-structure-disps rp-header typemod
+(define-primitive-structure-disps rp-header type-untyped
   ([uptr toplink]
    [uptr mv-return-address]
    [ptr livemask]
@@ -1706,7 +1726,7 @@
 (define-constant return-address-livemask-disp
   (- (constant rp-header-livemask-disp) (constant size-rp-header)))
 
-(define-primitive-structure-disps rp-compact-header typemod
+(define-primitive-structure-disps rp-compact-header type-untyped
   ([uptr toplink]
    [iptr mask+size+mode])) ; low bit is 1 to distinguish from a `rp-header`
 ;; mask+size+mode: bit 0 is 1 [=> compact-header-mask]
@@ -2224,7 +2244,7 @@
 
 (define-constant vspaces-offsets-count (- (constant vspaces-count) 1))
 
-(define-primitive-structure-disps vfasl-header typemod
+(define-primitive-structure-disps vfasl-header type-untyped
   ([uptr data-size]
    [uptr table-size]
    
@@ -3288,7 +3308,8 @@
     [pb-adr]
     [pb-inc pb-argument-types]
     [pb-lock]
-    [pb-cas])
+    [pb-cas]
+    [pb-link]) ; used by linker
 
   ;; Only foreign procedures that match specific prototypes are
   ;; supported, where each prototype must be handled in "pb.c"

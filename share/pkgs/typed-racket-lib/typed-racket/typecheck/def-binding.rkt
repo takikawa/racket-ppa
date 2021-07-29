@@ -9,10 +9,11 @@
          (for-template racket/base)
          "../utils/utils.rkt"
          (contract-req)
-         (utils tc-utils struct-info)
-         (types struct-table)
-         (private syntax-properties)
-         (typecheck renamer))
+         "../utils/tc-utils.rkt"
+         "../utils/struct-info.rkt"
+         "../types/struct-table.rkt"
+         "../private/syntax-properties.rkt"
+         "renamer.rkt")
 
 (provide with-fresh-mapping make-quad)
 
@@ -85,7 +86,7 @@
 
 
 (define-struct (def-struct-stx-binding def-stx-binding)
-  (sname tname static-info constructor-type extra-constr-name)
+  (sname tname static-info constructor-name constructor-type extra-constr-name)
   #:transparent
   #:methods gen:providable
   [(define/generic super-mk-quad mk-quad)
@@ -96,8 +97,8 @@
      (define (mk internal-id)
        (make-quad internal-id def-tbl pos-blame-id mk-redirect-id))
 
-     (match-define (def-struct-stx-binding internal-id sname tname si constr-type extra-constr-name) me)
-     (match-define (list type-desc constr pred (list accs ...) muts super) (extract-struct-info si))
+     (match-define (def-struct-stx-binding internal-id sname tname si constructor-name constr-type extra-constr-name) me)
+     (match-define (list type-desc constr^ pred (list accs ...) muts super) (extract-struct-info si))
      (define-values (defns export-defns new-ids aliases)
        (for/lists (defns export-defns new-ids aliases)
                   ([e (in-list (list* type-desc pred super accs))])
@@ -105,7 +106,8 @@
              (mk e)
              (mk-ignored-quad e))))
 
-     (define sname-is-constructor? (and (or extra-constr-name (free-identifier=? sname constr)) #t))
+     (define sname-is-constructor? (and (or extra-constr-name (free-identifier=? sname constructor-name)) #t))
+     (define constr (or extra-constr-name constr^))
      (define type-is-sname? (free-identifier=? tname internal-id))
      ;; Here, we recursively handle all of the identifiers referenced
      ;; in this static struct info.
@@ -205,5 +207,6 @@
                                            [sname identifier?]
                                            [tname identifier?]
                                            [static-info (or/c #f struct-info?)]
+                                           [constructor-name identifier?]
                                            [constructor-type any/c]
                                            [extra-constr-name (or/c #f identifier?)])))

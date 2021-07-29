@@ -37,6 +37,11 @@ static ptr s_ephemeron_pairp PROTO((ptr p));
 static ptr s_box_immobile PROTO((ptr p));
 static ptr s_make_immobile_vector PROTO((uptr len, ptr fill));
 static ptr s_make_immobile_bytevector PROTO((uptr len));
+static ptr s_make_reference_bytevector PROTO((uptr len));
+static ptr s_make_immobile_reference_bytevector PROTO((uptr len));
+static ptr s_reference_bytevectorp PROTO((ptr p));
+static ptr s_reference_star_address_object PROTO((ptr p));
+static ptr s_bytevector_reference_star_ref PROTO((ptr p, uptr offset));
 static ptr s_oblist PROTO((void));
 static ptr s_bigoddp PROTO((ptr n));
 static ptr s_float PROTO((ptr x));
@@ -210,7 +215,7 @@ static ptr s_box_immobile(p) ptr p; {
 }
 
 static ptr s_make_immobile_bytevector(uptr len) {
-  ptr b = S_bytevector2(get_thread_context(), len, 1);
+  ptr b = S_bytevector2(get_thread_context(), len, space_immobile_data);
   S_immobilize_object(b);
   return b;
 }
@@ -233,6 +238,36 @@ static ptr s_make_immobile_vector(uptr len, ptr fill) {
   }
 
   return v;
+}
+
+static ptr s_make_reference_bytevector(uptr len) {
+  ptr b = S_bytevector2(get_thread_context(), len, space_reference_array);
+  memset(&BVIT(b, 0), 0, len);
+  return b;
+}
+
+static ptr s_make_immobile_reference_bytevector(uptr len) { 
+  ptr b = s_make_reference_bytevector(len);
+  S_immobilize_object(b);
+  return b;  
+}
+
+static ptr s_reference_bytevectorp(p) ptr p; {
+  seginfo *si;
+  return (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && si->space == space_reference_array ? Strue : Sfalse;
+}
+
+static ptr s_reference_star_address_object(ptr p) {
+  if (p == (ptr)0)
+    return Sfalse;
+  else if (MaybeSegInfo(addr_get_segment(p)))
+    return (ptr)((uptr)p - reference_disp);
+  else
+    return Sunsigned((uptr)p);
+}
+
+static ptr s_bytevector_reference_star_ref(ptr p, uptr offset) {
+  return s_reference_star_address_object(*(ptr *)&BVIT(p, offset));
 }
 
 static ptr s_oblist() {
@@ -879,9 +914,9 @@ static ptr s_set_code_byte(p, n, x) ptr p, n, x; {
     ptr tc = get_thread_context();
 
     a = (I8 *)TO_VOIDP((uptr)p + UNFIX(n));
-    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I8));
     *a = (I8)UNFIX(x);
-    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I8));
 
     return Svoid;
 }
@@ -891,9 +926,9 @@ static ptr s_set_code_word(p, n, x) ptr p, n, x; {
     ptr tc = get_thread_context();
 
     a = (I16 *)TO_VOIDP((uptr)p + UNFIX(n));
-    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I16));
     *a = (I16)UNFIX(x);
-    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I16));
 
     return Svoid;
 }
@@ -903,9 +938,9 @@ static ptr s_set_code_long(p, n, x) ptr p, n, x; {
     ptr tc = get_thread_context();
 
     a = (I32 *)TO_VOIDP((uptr)p + UNFIX(n));
-    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I32));
     *a = (I32)(Sfixnump(x) ? UNFIX(x) : Sinteger_value(x));
-    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I32));
 
     return Svoid;
 }
@@ -915,9 +950,9 @@ static void s_set_code_long2(p, n, h, l) ptr p, n, h, l; {
     ptr tc = get_thread_context();
 
     a = (I32 *)TO_VOIDP((uptr)p + UNFIX(n));
-    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I32));
     *a = (I32)((UNFIX(h) << 16) + UNFIX(l));
-    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I32));
 }
 
 static ptr s_set_code_quad(p, n, x) ptr p, n, x; {
@@ -925,21 +960,18 @@ static ptr s_set_code_quad(p, n, x) ptr p, n, x; {
     ptr tc = get_thread_context();
 
     a = (I64 *)TO_VOIDP((uptr)p + UNFIX(n));
-    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I64));
     *a = Sfixnump(x) ? UNFIX(x) : S_int64_value("\\#set-code-quad!", x);
-    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a));
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I64));
 
     return Svoid;
 }
 
 static ptr s_set_reloc(p, n, e) ptr p, n, e; {
     iptr *a;
-    ptr tc = get_thread_context();
 
-    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(&CODERELOC(p)));
     a = (iptr *)(&RELOCIT(CODERELOC(p), UNFIX(n)));
     *a = Sfixnump(e) ? UNFIX(e) : Sinteger_value(e);
-    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(&CODERELOC(p)));
 
     return e;
 }
@@ -954,7 +986,7 @@ static ptr s_make_code(flags, free, name, arity_mark, n, info, pinfos)
     ptr co;
     ptr tc = get_thread_context();
 
-    S_thread_start_code_write(tc, 0, 0, NULL);
+    S_thread_start_code_write(tc, 0, 0, NULL, 0);
 
     co = S_code(tc, type_code | (flags << code_flags_offset), n);
     CODEFREE(co) = free;
@@ -966,7 +998,7 @@ static ptr s_make_code(flags, free, name, arity_mark, n, info, pinfos)
       S_G.profile_counters = Scons(S_weak_cons(co, pinfos), S_G.profile_counters);
     }
 
-    S_thread_end_code_write(tc, 0, 0, NULL);
+    S_thread_end_code_write(tc, 0, 0, NULL, 0);
 
     return co;
 }
@@ -974,10 +1006,10 @@ static ptr s_make_code(flags, free, name, arity_mark, n, info, pinfos)
 static ptr s_make_reloc_table(codeobj, n) ptr codeobj, n; {
     ptr tc = get_thread_context();
 
-    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(&CODERELOC(codeobj)));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(&CODERELOC(codeobj)), sizeof(ptr));
     CODERELOC(codeobj) = S_relocation_table(UNFIX(n));
     RELOCCODE(CODERELOC(codeobj)) = codeobj;
-    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(&CODERELOC(codeobj)));
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(&CODERELOC(codeobj)), sizeof(ptr));
     return Svoid;
 }
 
@@ -1663,6 +1695,11 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)box_immobile", (void *)s_box_immobile);
     Sforeign_symbol("(cs)make_immobile_vector", (void *)s_make_immobile_vector);
     Sforeign_symbol("(cs)make_immobile_bytevector", (void *)s_make_immobile_bytevector);
+    Sforeign_symbol("(cs)s_make_reference_bytevector", (void *)s_make_reference_bytevector);
+    Sforeign_symbol("(cs)s_make_immobile_reference_bytevector", (void *)s_make_immobile_reference_bytevector);
+    Sforeign_symbol("(cs)s_reference_bytevectorp", (void *)s_reference_bytevectorp);
+    Sforeign_symbol("(cs)s_reference_star_address_object", (void *)s_reference_star_address_object);
+    Sforeign_symbol("(cs)s_bytevector_reference_star_ref", (void *)s_bytevector_reference_star_ref);
     Sforeign_symbol("(cs)continuation_depth", (void *)S_continuation_depth);
     Sforeign_symbol("(cs)single_continuation", (void *)S_single_continuation);
     Sforeign_symbol("(cs)c_exit", (void *)c_exit);

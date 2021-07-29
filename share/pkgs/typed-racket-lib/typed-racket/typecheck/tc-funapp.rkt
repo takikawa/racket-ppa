@@ -1,25 +1,34 @@
 #lang racket/base
 
-(require (rename-in "../utils/utils.rkt" [infer r:infer])
+(require (except-in "../utils/utils.rkt" infer)
          racket/match racket/list racket/sequence
          (prefix-in c: (contract-req))
-         (utils tc-utils identifier)
-         (env tvar-env lexical-env)
          (for-syntax syntax/parse racket/base)
-         (types utils subtype resolve abbrev
-                substitute classes prop-ops)
-         (typecheck tc-metafunctions tc-app-helper tc-subst tc-envops
-                    check-below)
-         (rep type-rep)
-         (r:infer infer))
+         "../utils/tc-utils.rkt"
+         "../utils/identifier.rkt"
+         "../env/tvar-env.rkt"
+         "../env/lexical-env.rkt"
+         "../types/utils.rkt"
+         "../types/subtype.rkt"
+         "../types/resolve.rkt"
+         "../types/abbrev.rkt"
+         "../types/substitute.rkt"
+         "../types/classes.rkt"
+         "../types/prop-ops.rkt"
+         "tc-metafunctions.rkt"
+         "tc-app-helper.rkt"
+         "tc-subst.rkt"
+         "tc-envops.rkt"
+         "check-below.rkt"
+         "../rep/type-rep.rkt"
+         "../infer/infer.rkt")
 
 (require-for-cond-contract syntax/stx)
 
 (provide/cond-contract
   [tc/funapp
-   (syntax? stx-list? Type? (c:listof tc-results1/c)
-    (c:or/c #f tc-results/c)
-    . c:-> . full-tc-results/c)])
+   (syntax? stx-list? Type? (c:listof tc-results1/c) (c:or/c #f tc-results/c)
+            . c:-> . full-tc-results/c)])
 
 ;; macro that abstracts the common structure required to iterate over
 ;; the arrs of a polymorphic case lambda trying to infer the correct
@@ -82,12 +91,7 @@
       [(Some: _ (Fun: (list arrow rst ...)))
        (unless (null? rst)
          (tc-error/fields "currently doesn't support case->" #:delayed? #f))
-       (let ([checked-ret (tc/funapp1 f-stx args-stx arrow args-res expected)])
-         (match checked-ret
-           [(tc-results: (list (tc-result: t (PropSet: p+ p-) o__)) _)
-            (lexical-env (env+ (lexical-env) (list p+)))]
-           [_ #f])
-         checked-ret)]
+       (tc/funapp1 f-stx args-stx arrow args-res expected #:existential? #t)]
       [(DepFun: raw-dom raw-pre raw-rng)
        (parameterize ([with-refinements? #t])
          (define subst (for/list ([o (in-list argobjs)]

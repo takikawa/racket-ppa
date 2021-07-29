@@ -27,7 +27,13 @@
                (struct record-dc-datum
                  ((datum any/c)
                   (width natural-number/c)
-                  (height natural-number/c)))))
+                  (height natural-number/c)))
+               (struct number-markup
+                 ((number number?)
+                  (exact-prefix (or/c 'always 'never 'when-necessary))
+                  (inexact-prefix (or/c 'always 'never 'when-necessary))
+                  ;; for exact non-integers only
+                  (fraction-view (or/c 'mixed 'improper 'decimal))))))
 
 (define (markup? x)
   (or (string? x)
@@ -36,7 +42,8 @@
       (vertical-markup? x)
       (srcloc-markup? x)
       (framed-markup? x)
-      (image-markup? x)))
+      (image-markup? x)
+      (number-markup? x)))
 
 (struct empty-markup
   ()
@@ -66,9 +73,5 @@
   (datum width height)
   #:transparent)
 
-  
-
-
-
-  
-  
+(struct number-markup (number exact-prefix inexact-prefix fraction-view)
+  #:transparent)

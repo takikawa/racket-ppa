@@ -86,7 +86,7 @@
 (define schoolbook-intquotient (schemeop2 "(cs)ss_trunc"))
 (define schoolbook-intquotient-remainder (schemeop2 "(cs)ss_trunc_rem"))
 (define schoolbook-intremainder (schemeop2 "(cs)rem"))
-(define make-ratnum (schemeop2 "(cs)s_rational"))
+(define make-ratnum (schemeop2 "(cs)s_rational")) ; does not normalize, except detecting 1 as demoninator
 (define exgcd (schemeop2 "(cs)gcd"))
 
 (define $flsin (cflop1 "(cs)sin"))
@@ -2341,10 +2341,26 @@
               (let ([d ($ratio-denominator x)])
                 (make-ratnum (+ (* y d) ($ratio-numerator x)) d))]
              [(ratnum?)
-              (let ([xd ($ratio-denominator x)] [yd ($ratio-denominator y)])
-                (integer/
-                  (+ (* ($ratio-numerator x) yd) (* ($ratio-numerator y) xd))
-                  (* xd yd)))]
+	      ;; adapted from Gambit, see gambit/lib/_num.scm
+	      (let ((p ($ratio-numerator x))
+		    (q ($ratio-denominator x))
+		    (r ($ratio-numerator y))
+		    (s ($ratio-denominator y)))
+		(let ((d1 (exgcd q s)))
+		  (if (eqv? d1 1)
+		      (make-ratnum (+ (* p s)
+				      (* r q))
+				   (* q s))
+		      (let* ((s-prime (intquotient s d1))
+			     (t (+ (* p s-prime)
+				   (* r (intquotient q d1))))
+			     (d2 (exgcd d1 t))
+			     (num (intquotient t d2))
+			     (den (* (intquotient q d2)
+				     s-prime)))
+			(if (eqv? den 1)
+			    num
+			    (make-ratnum num den))))))]
              [($exactnum? $inexactnum?)
               (make-rectangular (+ x (real-part y)) (imag-part y))]
              [(flonum?) (exact-inexact+ x y)]
@@ -2388,7 +2404,103 @@
                               [(fx= x 1) (unless (number? y) (nonnumber-error who y)) y]
                               [else ($negate who y)])]
                             [else (integer* x y)])
-                           (let ()
+                           (let ([slim 32]
+				 [klim 100]
+				 [t3lim 512])
+                             ; both of the following functions were adapted from
+                             ; https://github.com/casevh/DecInt/blob/master/DecInt.py#L451
+                             ; under the BSD license
+                             (define (toom3 x y)
+                               (define xl (if (bignum? x) ($bignum-length x) 0))
+                               (define yl (if (bignum? y) ($bignum-length y) 0))
+                               (cond
+                                 [(and (fx< xl slim) (fx< yl slim))
+                                  (integer* x y)]
+                                 [(and (fx< xl klim) (fx< yl klim))
+                                  (karatsuba x y)]
+                                 [else
+                                  (let* ([k (fx* (fxquotient (fxmax xl yl) 3) (constant bigit-bits))]
+                                         [x-hi (ash x (fx* -2 k))]
+                                         [y-hi (ash y (fx* -2 k))]
+                                         [x-mid (bitwise-bit-field x k (fx* 2 k))]
+                                         [y-mid (bitwise-bit-field y k (fx* 2 k))]
+                                         [x-lo (bitwise-bit-field x 0 k)]
+                                         [y-lo (bitwise-bit-field y 0 k)]
+                                         [z0 (toom3 x-hi y-hi)]
+                                         [z4 (toom3 x-lo y-lo)]
+                                         [t1 (toom3 (+ x-hi x-mid x-lo) (+ y-hi y-mid y-lo))]
+                                         [t2 (toom3 (+ (- x-hi x-mid) x-lo) (+ (- y-hi y-mid) y-lo))]
+                                         [t3 (* (+ x-hi (ash x-mid 1) (ash x-lo 2))
+                                                (+ y-hi (ash y-mid 1) (ash y-lo 2)))]
+                                         [z2 (- (ash (+ t1 t2) -1) z0 z4)]
+                                         [t4 (- t3 z0 (ash z2 2) (ash z4 4))]
+                                         [z3 (quotient (+ (- t4  t1) t2) 6)]
+                                         [z1 (- (ash (- t1 t2) -1) z3)])
+                                    (+ (ash z0 (* k 4))
+                                       (ash z1 (* k 3))
+                                       (ash z2 (* k 2))
+                                       (ash z3 (* k 1))
+                                       (ash z4 (* k 0))))]))
+
+                             (define (toom4 x y)
+                               (define xl (if (bignum? x) ($bignum-length x) 0))
+                               (define yl (if (bignum? y) ($bignum-length y) 0))
+                               (cond
+                                 [(and (fx< xl slim) (fx< yl slim))
+                                  (integer* x y)]
+                                 [(and (fx< xl klim) (fx< yl klim))
+                                  (karatsuba x y)]
+                                 [(and (fx< xl t3lim) (fx< yl t3lim))
+                                  (toom3 x y)]
+                                 [else
+                                  (let* ((k (fx* (fxquotient (fxmax xl yl) 4) (constant bigit-bits)))
+                                         (x0 (ash x (fx* -3 k)))
+                                         (y0 (ash y (fx* -3 k)))
+                                         (x1 (bitwise-bit-field x (fx* 2 k) (fx* 3 k)))
+                                         (y1 (bitwise-bit-field y (fx* 2 k) (fx* 3 k)))
+                                         (x2 (bitwise-bit-field x (fx* 1 k) (fx* 2 k)))
+                                         (y2 (bitwise-bit-field y (fx* 1 k) (fx* 2 k)))
+                                         (x3 (bitwise-bit-field x 0 k))
+                                         (y3 (bitwise-bit-field y 0 k))
+                                         (z0 (toom4 x0 y0))
+                                         (z6 (toom4 x3 y3))
+                                         (t0 (+ z0 z6))
+                                         (xeven (+ x0 x2))
+                                         (xodd (+ x1 x3))
+                                         (yeven (+ y0 y2))
+                                         (yodd (+ y1 y3))
+                                         (t1 (- (toom4 (+ xeven xodd) (+ yeven yodd)) t0))
+                                         (t2 (- (toom4 (- xeven xodd) (- yeven yodd)) t0))
+                                         (xeven (+ x0 (ash x2 2)))
+                                         (xodd (+ (ash x1 1) (ash x3 3)))
+                                         (yeven (+ y0 (ash y2 2)))
+                                         (yodd (+ (ash y1 1) (ash y3 3)))
+                                         (t0 (+ z0 (ash z6 6)))
+                                         (t3 (- (toom4 (+ xeven xodd) (+ yeven yodd)) t0))
+                                         (t4 (- (toom4 (- xeven xodd) (- yeven yodd)) t0))
+                                         (t5 (- (* (+ x0 (* 3 x1) (* 9 x2) (* 27 x3))
+                                                   (+ y0 (* 3 y1) (* 9 y2) (* 27 y3)))
+                                                (+ z0 (* 729 z6))))
+                                         (t6 (+ t1 t2))
+                                         (t7 (+ t3 t4))
+                                         (z4 (quotient (- t7 (ash t6 2)) 24))
+                                         (z2 (- (ash t6 -1) z4))
+                                         (t8 (- t1 z2 z4))
+                                         (t9 (- t3 (ash z2 2) (ash z4 4)))
+                                         (t10 (- t5 (* 9 z2) (* 81 z4)))
+                                         (t11 (- t10 (* 3 t8)))
+                                         (t12 (- t9 (ash t8 1)))
+                                         (z5 (quotient (- t11 (ash t12 2)) 120))
+                                         (z3 (quotient (- (ash t12 3) t11) 24))
+                                         (z1 (- t8 z3 z5)))
+                                    (+ (ash z0 (* k 6))
+                                       (ash z1 (* k 5))
+                                       (ash z2 (* k 4))
+                                       (ash z3 (* k 3))
+                                       (ash z4 (* k 2))
+                                       (ash z5 (* k 1))
+                                       (ash z6 (* k 0))))]))
+
                               ;; _Modern Computer Arithmetic_, Brent and Zimmermann
                               (define (karatsuba x y)
                                 (define xl (if (bignum? x) ($bignum-length x) 0))
@@ -2400,8 +2512,8 @@
                                   (let* ([k (fx* (fxquotient (fxmax xl yl) 2) (constant bigit-bits))]
                                          [x-hi (ash x (fx- k))]
                                          [y-hi (ash y (fx- k))]
-                                         [x-lo (- x (ash x-hi k))]
-                                         [y-lo (- y (ash y-hi k))]
+					 [x-lo (bitwise-bit-field x 0 k)]
+					 [y-lo (bitwise-bit-field y 0 k)]
                                          [c0 (karatsuba x-lo y-lo)]
                                          [c1 (karatsuba x-hi y-hi)]
                                          [c1-c2 (cond
@@ -2424,10 +2536,10 @@
                                     [yz (if (bignum? y) ($bignum-trailing-zero-bits y) 0)])
                                 (let ([z (fx+ xz yz)])
                                   (if (fx= z 0)
-                                      (karatsuba x y)
+                                      (toom4 x y)
                                       (bitwise-arithmetic-shift-left
-                                       (karatsuba (bitwise-arithmetic-shift-right x xz)
-                                                  (bitwise-arithmetic-shift-right y yz))
+                                       (toom4 (bitwise-arithmetic-shift-right x xz)
+					      (bitwise-arithmetic-shift-right y yz))
                                        z))))))]
              [(ratnum?) (/ (* x ($ratio-numerator y)) ($ratio-denominator y))]
              [($exactnum? $inexactnum?)
@@ -2439,9 +2551,20 @@
              [(fixnum? bignum?)
               (integer/ (* y ($ratio-numerator x)) ($ratio-denominator x))]
              [(ratnum?)
-              (integer/
-                (* ($ratio-numerator x) ($ratio-numerator y))
-                (* ($ratio-denominator x) ($ratio-denominator y)))]
+	      ;; adapted from Gambit, see gambit/lib/_num.scm
+	      (let ((p ($ratio-numerator x))
+		    (q ($ratio-denominator x))
+		    (r ($ratio-numerator y))
+		    (s ($ratio-denominator y)))
+		(if (eq? x y)
+		    (make-ratnum (magnitude-squared p) (magnitude-squared q))     ;; already in lowest form
+		    (let* ((gcd-ps (exgcd p s))
+			   (gcd-rq (exgcd r q))
+			   (num (* (intquotient p gcd-ps) (intquotient r gcd-rq)))
+			   (den (* (intquotient q gcd-rq) (intquotient s gcd-ps))))
+		      (if (eqv? den 1)
+			  num
+			  (make-ratnum num den)))))]
              [($exactnum? $inexactnum?)
               (make-rectangular (* x (real-part y)) (* x (imag-part y)))]
              [(flonum?) (exact-inexact* x y)]
@@ -2491,10 +2614,26 @@
               (let ([d ($ratio-denominator x)])
                 (make-ratnum (- ($ratio-numerator x) (* y d)) d))]
              [(ratnum?)
-              (let ([xd ($ratio-denominator x)] [yd ($ratio-denominator y)])
-                (integer/
-                  (- (* ($ratio-numerator x) yd) (* ($ratio-numerator y) xd))
-                  (* xd yd)))]
+	      ;; adapted from Gambit, see gambit/lib/_num.scm
+	      (let ((p ($ratio-numerator x))
+		    (q ($ratio-denominator x))
+		    (r ($ratio-numerator y))
+		    (s ($ratio-denominator y)))
+		(let ((d1 (gcd q s)))
+		  (if (eqv? d1 1)
+		      (make-ratnum (- (* p s)
+				      (* r q))
+				   (* q s))
+		      (let* ((s-prime (intquotient s d1))
+			     (t (- (* p s-prime)
+				   (* r (intquotient q d1))))
+			     (d2 (exgcd d1 t))
+			     (num (intquotient t d2))
+			     (den (* (intquotient q d2)
+				     s-prime)))
+			(if (eqv? den 1)
+			    num
+			    (make-ratnum num den))))))]
              [($exactnum? $inexactnum?)
               (make-rectangular (- x (real-part y)) (- (imag-part y)))]
              [(flonum?) (exact-inexact- x y)]
@@ -2561,11 +2700,35 @@
              [else (nonnumber-error who x)])]
          [(ratnum?)
           (type-case x
-             [(fixnum? bignum?)
-              (integer/ (* x ($ratio-denominator y)) ($ratio-numerator y))]
+	     [(fixnum? bignum?)
+              (cond
+                [(eq? x 1) (if (negative? ($ratio-numerator y))
+                               (make-ratnum ($negate who ($ratio-denominator y)) ($negate who ($ratio-numerator y)))
+                               (make-ratnum ($ratio-denominator y) ($ratio-numerator y)))]
+                [(eq? x -1) (if (negative? ($ratio-numerator y))
+                                (make-ratnum ($ratio-denominator y) ($negate who ($ratio-numerator y)))
+                                (make-ratnum ($negate who ($ratio-denominator y)) ($ratio-numerator y)))]
+                [else
+                 (integer/ (* x ($ratio-denominator y)) ($ratio-numerator y))])]
              [(ratnum?)
-              (integer/ (* ($ratio-numerator x) ($ratio-denominator y))
-                        (* ($ratio-denominator x) ($ratio-numerator y)))]
+	      ;; adapted from Gambit, see gambit/lib/_num.scm
+	      (let ((p ($ratio-numerator x))
+		    (q ($ratio-denominator x))
+		    (r ($ratio-denominator y))
+		    (s ($ratio-numerator y)))
+		(if (eq? x y)
+		    1
+		    (let* ((gcd-ps (exgcd p s))
+			   (gcd-rq (exgcd r q))
+			   (num (* (intquotient p gcd-ps) (intquotient r gcd-rq)))
+			   (den (* (intquotient q gcd-rq) (intquotient s gcd-ps))))
+		      (if (negative? den)
+			  (if (eqv? den -1)
+			      (- num)
+			      (make-ratnum (- num) (- den)))
+			  (if (eqv? den 1)
+			      num
+			      (make-ratnum num den))))))]
              [($exactnum? $inexactnum?)
               (make-rectangular (/ (real-part x) y) (/ (imag-part x) y))]
              [(flonum?) (inexact-exact/ x y)]
@@ -2599,7 +2762,7 @@
                                       (/ (- (* b c) (* a d)) t))))
                 ;; Let r = c/d or d/c, depending on which is larger
                 (cond
-                 [(and ($exactnum? x) ($exactnum? y))
+                 [(or (eq? c 0) (and ($exactnum? x) ($exactnum? y)))
                   (simpler-divide a b c d)]
                  [(< (abs c) (abs d))
                   (let ([r (/ d c)])

@@ -121,7 +121,8 @@ the parameter value is used for the module name and @racket[id] is
 ignored, otherwise @racket[(#,(racket quote) id)] is the name of the
 declared module. For a @tech{submodule}, @racket[id] is the name of
 the submodule to be used as an element within a @racket[submod] module
-path.
+path. A @racket[module] form is not allowed in an @tech{expression context}
+or @tech{internal-definition context}.
 
 @margin-note/ref{For a @racket[module]-like form that works in
 definitions context other than the top level or a module body, see
@@ -227,9 +228,7 @@ that produces syntax definitions must be defined before it is used.
 No identifier can be imported or defined more than once at any
 @tech{phase level} within a single module, except that a definition
 via @racket[define-values] or @racket[define-syntaxes] can shadow a
-preceding import via @racket[#%require]; unless the shadowed import is
-from the module's initial @racket[module-path], a warning is logged
-to the initial logger.
+preceding import via @racket[#%require].
 Every exported identifier must be imported or
 defined. No expression can refer to a @tech{top-level variable}.
 A @racket[module*] form in which the enclosing module's bindings are visible
@@ -258,6 +257,14 @@ of a definition is followed, outside of the prompt, by a check that
 each of the definition's variables has a value; if the portion of the
 prompt-delimited continuation that installs values is skipped, then
 the @exnraise[exn:fail:contract:variable?].
+
+Portions of a module body at higher phase levels are delimited
+similarly to run-time portions. For example, portions of a module
+within @racket[begin-for-syntax] are delimited by a continuation
+prompt both as the module is expanded and when it is visited. The
+evaluation of a @racket[define-syntaxes] form is delimited, but unlike
+@racket[define-values], there is no check that the syntax definition
+completed.
 
 Accessing a @tech{module-level variable} before it is defined signals
 a run-time error, just like accessing an undefined global variable.
@@ -520,7 +527,14 @@ bindings of each @racket[require-spec] are visible for expanding later
   named module, using the export identifiers as the local identifiers.
   (See below for information on @racket[module-path].) The lexical
   context of the @racket[module-path] form determines the context of
-  the introduced identifiers.}
+  the introduced identifiers.
+
+  If any identifier provided by @racket[module-path] has a symbol form
+  that is @tech{uninterned}, the identifier is not imported (i.e., it
+  is impossible to import a binding for an uninterned symbol). This
+  restriction is intended to avoid compilation differences depending
+  on whether a module has been saved to a file or not (see
+  @secref["print-compiled"]).}
 
  @defsubform[(only-in require-spec id-maybe-renamed ...)]{
   Like @racket[require-spec], but constrained to those exports for
@@ -2861,21 +2875,28 @@ The same as @racket[(quote datum)] if @racket[datum] does not include
 and the result of the @racket[_expr] takes the place of the
 @racket[(#,unquote-id _expr)] form in the @racket[quasiquote] result. An
 @racket[(#,unquote-splicing-id _expr)] similarly escapes, but the
-@racket[_expr] must produce a list, and its elements are spliced as
-multiple values place of the @racket[(#,unquote-splicing-id _expr)], which
-must appear as the @racket[car] of a quoted pair, as an element of a
-quoted vector, or as an element of a quoted @tech{prefab} structure;
-in the case of a pair, if the @racket[cdr] of the relevant quoted pair
-is empty, then @racket[_expr] need not produce a list, and its result
-is used directly in place of the quoted pair (in the same way that
-@racket[append] accepts a non-list final argument).  In a quoted
-@tech{hash table}, an @racket[(#,unquote-id _expr)] or
-@racket[(#,unquote-splicing-id _expr)] expression escapes only in the
-second element of an entry pair (i.e., the value), while entry keys
-are always implicitly quoted. If @racket[unquote] or
-@racket[unquote-splicing] appears within @racket[quasiquote] in any
-other way than as @racket[(#,unquote-id _expr)] or
-@racket[(#,unquote-splicing-id _expr)], a syntax error is reported.
+@racket[_expr] produces a list whose elements are spliced as
+multiple values place of the @racket[(#,unquote-splicing-id _expr)].
+
+An @|unquote-id| or @|unquote-splicing-id| form is recognized in any
+of the following escaping positions within @racket[datum]: in a pair,
+in a vector, in a box, in a @tech{prefab} structure field after the
+name position, and in hash table value position (but not in a hash
+table key position). Such escaping positions can be nested to an
+arbitrary depth.
+
+An @|unquote-splicing-id| form must appear as the @racket[car] of a
+quoted pair, as an element of a quoted vector, or as an element of a
+quoted @tech{prefab} structure. In the case of a pair, if the
+@racket[cdr] of the relevant quoted pair is empty, then @racket[_expr]
+need not produce a list, and its result is used directly in place of
+the quoted pair (in the same way that @racket[append] accepts a
+non-list final argument).
+
+If @racket[unquote] or @racket[unquote-splicing] appears within
+@racket[quasiquote] in an escaping position but in a way other than as
+@racket[(#,unquote-id _expr)] or @racket[(#,unquote-splicing-id
+_expr)], a syntax error is reported.
 
 @mz-examples[
 (eval:alts (#,(racket quasiquote) (0 1 2)) `(0 1 2))
@@ -3040,12 +3061,15 @@ which has fewer dependencies than @racketmodname[racket/performance-hint].
                       (code:line keyword [arg-id default-expr])])]{
 Like @racket[define], but ensures that the definition will be inlined at its
 call sites. Recursive calls are not inlined, to avoid infinite inlining.
-Higher-order uses are supported, but also not inlined.
+Higher-order uses are supported, but also not inlined. Misapplication (by
+supplying the wrong number of arguments or incorrect keyword arguments) is
+also not inlined and left as a run-time error.
 
-@racket[define-inline] may interfere with the Racket compiler's own inlining
+The @racket[define-inline] form may interfere with the Racket compiler's own inlining
 heuristics, and should only be used when other inlining attempts (such as
 @racket[begin-encourage-inline]) fail.
-}
+
+@history[#:changed "8.1.0.5" @elem{Changed to treat misapplication as a run-time error.}]}
 
 
 @;------------------------------------------------------------------------

@@ -2043,7 +2043,7 @@ please adhere to these guidelines:
   (spell-program-wrote-to-stderr-on-startup "The spell program (~a) printed an error message:")
   (spell-program-did-not-respond-after-some-seconds
    "The spell program (~a) did not respond after ~a seconds")
-  (spell-skip-to-next-misspelled-word "Skip to Next Mispelled Word") ;; menu item
+  (spell-skip-to-next-misspelled-word "Skip to Next Misspelled Word") ;; menu item
   (spell-suggest-corrections "Suggest Spelling Corrections…") ;; menu item
   (spell-correction-suggestions "Spelling Correction Suggestions") ;; dialog title
   (spell-choose-replacement-word "Select a replacement word") ;; label in dialog

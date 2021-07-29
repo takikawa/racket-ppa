@@ -57,6 +57,8 @@
 
 #define IN_FIXNUM_RANGE_ON_ALL_PLATFORMS(v) (((v) >= -1073741824) && ((v) <= 1073741823))
 
+#define MOST_POSITIVE_FIXNUM (((uintptr_t)-1) >> 2)
+#define MOST_NEGATIVE_FIXNUM ((((uintptr_t)-1) >> 1) ^ (((uintptr_t)-1) >> 2))
 
 /* We support 2^SCHEME_PRIM_OPT_INDEX_SIZE combinations of optimization flags: */
 
@@ -3671,6 +3673,8 @@ void scheme_rktio_socket_to_input_port(struct rktio_fd_t *fd, Scheme_Object *nam
                                        Scheme_Object **_inp);
 void scheme_rktio_socket_to_output_port(struct rktio_fd_t *fd, Scheme_Object *name, int takeover,
                                         Scheme_Object **_outp);
+
+void scheme_rktio_write_all(struct rktio_fd_t *fd, const char *data, intptr_t len);
 
 void scheme_fs_change_properties(int *_supported, int *_scalable, int *_low_latency, int *_file_level);
 

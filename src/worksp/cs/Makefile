@@ -10,8 +10,8 @@ LIBS = $(RKTIO_LIB) \
        $(SCHEME_LIB_FULL) \
        $(WIN32_LIBS)
 
-LZ4_DLL = ..\liblz4.dll
-LZ4_LIB = $(SCHEME_DIR)\$(MACHINE)\lz4\lib\liblz4.lib
+LZ4_DLL = ..\liblz4mt.dll
+LZ4_LIB = $(SCHEME_DIR)\$(MACHINE)\lz4\lib\liblz4mt.lib
 
 DEST_DLL = ..\..\build\raw_libracketcs.dll
 DEST = ..\..\build\raw_racketcs.exe
@@ -52,7 +52,7 @@ gracket.res: ../gracket/gracket.rc ../gracket/gracket.ico
 
 # Useful for adjusting boot file compression:
 
-$(LZ4_DLL): lz4.c lz4.def
+$(LZ4_DLL): lz4.c lz4.def $(LZ4_LIB)
 	cl /LD /DLL /Fe$(LZ4_DLL) $(FLAGS) lz4.c $(LZ4_LIB) $(WIN32_LIBS) /link /DEF:lz4.def 
 
 # Useful for debugging:

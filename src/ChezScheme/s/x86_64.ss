@@ -739,58 +739,89 @@
   (define-instruction pred (condition-code)
     [(op) (values '() `(asm ,info ,(asm-condition-code info)))])
 
-  (let* ([info-cc-eq (make-info-condition-code 'eq? #f #t)]
-         [asm-eq (asm-relop info-cc-eq)])
-    (define-instruction pred (type-check?)
-      [(op (x ur mem) (mask imm32 ur) (type imm32 ur))
-       (let ([tmp (make-tmp 'u)])
-         (values
-           (with-output-language (L15d Effect)
-             (seq
+  (let ()
+    (define imm->imm32
+      (lambda (y w k)
+        (nanopass-case (L15d Triv) w
+          [(immediate ,imm)
+           (if (signed-32? imm)
+               (k y w)
+               (let ([tmp (make-tmp 'u)]
+                     [zero (with-output-language (L15d Triv)
+                             `(immediate 0))])
+                 (with-output-language (L15d Effect)
+                   (seq
+                    `(set! ,(make-live-info) ,tmp ,w)
+                    (if (eq? y %zero)
+                        (k tmp zero)
+                        (seq
+                         `(set! ,(make-live-info) ,tmp (asm ,null-info ,asm-add ,tmp ,y))
+                         (k tmp zero)))))))])))
+
+    (let* ([info-cc-eq (make-info-condition-code 'eq? #f #t)]
+           [asm-eq (asm-relop info-cc-eq)])
+      (define-instruction pred (type-check?)
+        [(op (x ur mem) (mask imm32 ur) (type imm32 ur))
+         (let ([tmp (make-tmp 'u)])
+           (values
+            (with-output-language (L15d Effect)
+              (seq
                `(set! ,(make-live-info) ,tmp ,x)
                `(set! ,(make-live-info) ,tmp (asm ,null-info ,asm-logand ,tmp ,mask))))
-           `(asm ,info-cc-eq ,asm-eq ,tmp ,type)))])
+            `(asm ,info-cc-eq ,asm-eq ,tmp ,type)))])
 
-    (define-instruction pred (logtest log!test)
-      [(op (x mem) (y ur imm32))
-       (values '() `(asm ,info-cc-eq ,(asm-logtest (eq? op 'log!test) info-cc-eq) ,x ,y))]
-      [(op (x ur imm32) (y mem))
-       (values '() `(asm ,info-cc-eq ,(asm-logtest (eq? op 'log!test) info-cc-eq) ,y ,x))]
-      [(op (x imm32) (y ur))
-       (values '() `(asm ,info-cc-eq ,(asm-logtest (eq? op 'log!test) info-cc-eq) ,y ,x))]
-      [(op (x ur) (y ur imm32))
-       (values '() `(asm ,info-cc-eq ,(asm-logtest (eq? op 'log!test) info-cc-eq) ,x ,y))])
+      (define-instruction pred (logtest log!test)
+        [(op (x mem) (y ur imm32))
+         (values '() `(asm ,info-cc-eq ,(asm-logtest (eq? op 'log!test) info-cc-eq) ,x ,y))]
+        [(op (x ur imm32) (y mem))
+         (values '() `(asm ,info-cc-eq ,(asm-logtest (eq? op 'log!test) info-cc-eq) ,y ,x))]
+        [(op (x imm32) (y ur))
+         (values '() `(asm ,info-cc-eq ,(asm-logtest (eq? op 'log!test) info-cc-eq) ,y ,x))]
+        [(op (x ur) (y ur imm32))
+         (values '() `(asm ,info-cc-eq ,(asm-logtest (eq? op 'log!test) info-cc-eq) ,x ,y))])
 
-    (define-instruction pred (lock!)
-      [(op (x ur) (y ur) (w imm32))
-       (let ([uts (make-precolored-unspillable 'uts %ts)])
-         (values
-           (nanopass-case (L15d Triv) w
-             [(immediate ,imm)
-              (with-output-language (L15d Effect)
-                (seq
-                  `(set! ,(make-live-info) ,uts (immediate 1))
-                  `(set! ,(make-live-info) ,uts
-                     (asm ,info ,asm-exchange ,uts
-                       (mref ,x ,y ,imm uptr)))))])
-           `(asm ,info-cc-eq ,asm-eq ,uts (immediate 0))))]))
+      (define-instruction pred (lock!)
+        [(op (x ur) (y ur) (w imm))
+         (imm->imm32
+          y w
+          (lambda (y w)
+            (let ([uts (make-precolored-unspillable 'uts %ts)])
+              (values
+               (nanopass-case (L15d Triv) w
+                 [(immediate ,imm)
+                  (with-output-language (L15d Effect)
+                    (seq
+                     `(set! ,(make-live-info) ,uts (immediate 1))
+                     `(set! ,(make-live-info) ,uts
+                            (asm ,info ,asm-exchange ,uts
+                                 (mref ,x ,y ,imm uptr)))))])
+               `(asm ,info-cc-eq ,asm-eq ,uts (immediate 0))))))]))
 
-  (define-instruction effect (locked-incr!)
-    [(op (x ur) (y ur) (w imm32))
-     `(asm ,info ,asm-locked-incr ,x ,y ,w)])
+    (define-instruction effect (locked-incr!)
+      [(op (x ur) (y ur) (w imm))
+       (imm->imm32
+        y w
+        (lambda (y w)
+          `(asm ,info ,asm-locked-incr ,x ,y ,w)))])
 
-  (define-instruction effect (locked-decr!)
-    [(op (x ur) (y ur) (w imm32))
-     `(asm ,info ,asm-locked-decr ,x ,y ,w)])
+    (define-instruction effect (locked-decr!)
+      [(op (x ur) (y ur) (w imm))
+       (imm->imm32
+        y w
+        (lambda (y w)
+          `(asm ,info ,asm-locked-decr ,x ,y ,w)))])
 
-  (define-instruction effect (cas)
-    [(op (x ur) (y ur) (w imm32) (old ur) (new ur))
-     (let ([urax (make-precolored-unspillable 'urax %rax)])
-       (with-output-language (L15d Effect)
-         (seq
-           `(set! ,(make-live-info) ,urax ,old)
-           ;; NB: may modify %rax:
-           `(asm ,info ,asm-locked-cmpxchg ,x ,y ,w ,urax ,new))))])
+    (define-instruction effect (cas)
+      [(op (x ur) (y ur) (w imm) (old ur) (new ur))
+       (imm->imm32
+        y w
+        (lambda (y w)
+          (let ([urax (make-precolored-unspillable 'urax %rax)])
+            (with-output-language (L15d Effect)
+              (seq
+               `(set! ,(make-live-info) ,urax ,old)
+               ;; NB: may modify %rax:
+               `(asm ,info ,asm-locked-cmpxchg ,x ,y ,w ,urax ,new))))))]))
 
   (define-instruction effect (pause)
     [(op) `(asm ,info ,asm-pause)])
@@ -2629,7 +2660,7 @@
                           `(set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-8 #f)
                                                                ,%load ,x ,%zero (immediate ,x-offset)))]))))]
                  [load-content-regs
-                  (lambda (classes size iint ifp)
+                  (lambda (classes size unsigned? iint ifp)
                     (lambda (x) ; requires var
                       (let loop ([size size] [iint iint] [ifp ifp] [classes classes] [x-offset 0])
                         (cond
@@ -2654,13 +2685,13 @@
                           (let loop ([reg (vector-ref vint iint)] [size size] [x-offset x-offset])
                             (cond
                              [(= size 4)
-                              `(set! ,reg (inline ,(make-info-load 'unsigned-32 #f)
+                              `(set! ,reg (inline ,(make-info-load (if unsigned? 'unsigned-32 'integer-32) #f)
                                                   ,%load ,x ,%zero (immediate ,x-offset)))]
                              [(= size 2)
-                              `(set! ,reg (inline ,(make-info-load 'unsigned-16 #f)
+                              `(set! ,reg (inline ,(make-info-load (if unsigned? 'unsigned-16 'integer-16) #f)
                                                   ,%load ,x ,%zero (immediate ,x-offset)))]
                              [(= size 1)
-                              `(set! ,reg (inline ,(make-info-load 'unsigned-8 #f)
+                              `(set! ,reg (inline ,(make-info-load (if unsigned? 'unsigned-8 'integer-8) #f)
                                                   ,%load ,x ,%zero (immediate ,x-offset)))]
                              [(> size 4)
                               ;; 5, 6, or 7: multiple steps to avoid reading too many bytes
@@ -2721,12 +2752,12 @@
                                           (eq? 'float (caar ($ftd->members ftd))))
                                      ;; float or double
                                      (loop (cdr types)
-                                       (cons (load-content-regs '(sse) ($ftd-size ftd) i i) locs)
+                                       (cons (load-content-regs '(sse) ($ftd-size ftd) #t i i) locs)
                                        (add-regs 1 i vint regs) (add-regs 1 i vfp fp-regs) (fx+ i 1) isp)]
                                     [else
                                      ;; integer
                                      (loop (cdr types)
-                                       (cons (load-content-regs '(integer) ($ftd-size ftd) i i) locs)
+                                       (cons (load-content-regs '(integer) ($ftd-size ftd) ($ftd-unsigned? ftd) i i) locs)
                                        (add-regs 1 i vint regs) fp-regs(fx+ i 1) isp)])]
                                   [else
                                    ;; pass as value on the stack
@@ -2790,7 +2821,7 @@
                                   [else
                                    ;; pass in registers
                                    (loop (cdr types)
-                                         (cons (load-content-regs classes ($ftd-size ftd) iint ifp) locs)
+                                         (cons (load-content-regs classes ($ftd-size ftd) ($ftd-unsigned? ftd) iint ifp) locs)
                                          (add-regs ints iint vint regs) (add-regs fps ifp vfp fp-regs)
                                          (fx+ iint ints) (fx+ ifp fps) isp)]))]
                               [else

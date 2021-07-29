@@ -6,6 +6,7 @@
          racket/contract/combinator
          racket/function
          racket/generator
+         racket/match
          (rename-in "private/for.rkt"
                     [stream-ref stream-get-generics])
          "private/sequence.rkt"
@@ -66,7 +67,13 @@
                            (quote-syntax stream-first)
                            (quote-syntax stream-rest))))
 
-(define-syntax stream
+(define-match-expander stream
+  (syntax-rules ()
+    [(_) (? stream-empty?)]
+    [(_ hd tl ...)
+     (? stream-cons?
+        (app stream-first hd)
+        (app stream-rest (stream tl ...)))])
   (syntax-rules ()
     ((_)
      empty-stream)
@@ -76,12 +83,21 @@
     ((_ hd tl ...)
      (stream-cons hd (stream tl ...)))))
 
-(define-syntax stream*
+(define-match-expander stream*
+  (syntax-rules ()
+    [(_ tl) (? stream? tl)]
+    [(_ hd tl ...)
+     (? stream-cons?
+        (app stream-first hd)
+        (app stream-rest (stream* tl ...)))])
   (syntax-rules ()
     [(_ tl)
      (stream-lazy #:who 'stream* tl)]
     [(_ hd tl ...)
      (stream-cons hd (stream* tl ...))]))
+
+(define (stream-cons? st)
+  (and (stream? st) (not (stream-empty? st))))
 
 (define (stream->list s)
   (for/list ([v (in-stream s)]) v))
@@ -103,7 +119,14 @@
       (raise-arguments-error 'stream-ref
                              "stream ended before index"
                              "index" i
-                             "stream" st)]
+                             ;; Why `"stream" st` is omitted:
+                             ;; including `st` in the error message
+                             ;; means that it has to be kept live;
+                             ;; that's not so great for a stream, where
+                             ;; lazy construction could otherwise allow
+                             ;; a element to be reached without consuming
+                             ;; proportional memory
+                             #;"stream" #;st)]
      [(zero? n)
       (stream-first s)]
      [else
@@ -120,11 +143,10 @@
       (raise-arguments-error 'stream-tail
                              "stream ended before index"
                              "index" i
-                             "stream" st)]
+                             ;; See "Why `"stream" st` is omitted" above
+                             #;"stream" #;st)]
      [else
       (loop (sub1 n) (stream-rest s))])))
-
-
 
 (define (stream-take st i)
   (unless (stream? st) (raise-argument-error 'stream-take "stream?" st))
@@ -137,7 +159,8 @@
       (raise-arguments-error 'stream-take
                              "stream ended before index"
                              "index" i
-                             "stream" st)]
+                             ;; See "Why `"stream" st` is omitted" above
+                             #;"stream" #;st)]
      [else
       (make-do-stream (lambda () #f)
                       (lambda () (stream-first s))

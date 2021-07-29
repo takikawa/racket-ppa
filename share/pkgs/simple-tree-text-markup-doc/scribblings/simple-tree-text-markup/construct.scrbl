@@ -34,6 +34,34 @@ This is a markup object representing an empty line, i.e. empty
 vertical space.
 }
 
+@defproc[(number [number number?]
+		 [#:exact-prefix exact-prefix (or/c 'always 'never 'when-necessary) 'never]
+		 [#:inexact-prefix inexact-prefix (or/c 'always 'never 'when-necessary) 'never]
+		 [#:fraction-view fraction-view (or/c #f 'mixed 'improper 'decimal) #f])
+  markup?]{
+This constructs markup for a number to be rendered in a format that can be read back.
+
+The @racket[exact-prefix] argument specifies whether the representation
+should carry a @litchar{#e} prefix: Always, never, or when necessary to
+identify a representation that would otherwise be considered inexact.
+
+Similarly for @racket[inexact-prefix].  Note however that @racket['when-necessary]
+is usually equivalent to @racket['never], as inexact numbers are always
+printed with a decimal dot, which is sufficient to identify a number
+representation as inexact.
+
+The @racket[fraction-view] field specifies how exact non-integer reals
+- fractions - should be rendered: As a mixed fraction, an improper fraction,
+or a decimal, possibly identifying periodic digits.  For @racket['decimal],
+if it's not possible to render the number as a decimal exactly, a fraction
+representation might be generated. For @racket['mixed] an improper fraction
+representation might be generated if a mixed representation could not be read
+back.
+
+If @racket[fraction-view] is @racket[#f], this option comes from some
+unspecified user preference.
+}
+
 @defproc[(horizontal [markup markup?] ...) markup?]{
 This procedure arranges the @racket[markup] arguments horizontally.
 }
