@@ -861,7 +861,8 @@ plus1 arg list construction: build-plus-one-arity-function/real
                        '()))
           method?))
        (syntax-property
-        #`(let #,let-bindings
+        (quasisyntax/loc stx
+          (let #,let-bindings
             #,(cond
                 [(and (not method?)
                       (null? kwd-args)
@@ -901,7 +902,7 @@ plus1 arg list construction: build-plus-one-arity-function/real
                     #,(if ellipsis-info
                           #`(ellipsis-rest-arg #,(length regular-args) #,@ellipsis-info)
                           #'#f)
-                    #,method?))]))
+                    #,method?))])))
         'racket/contract:contract
         (vector this->
                 ;; the -> in the original input to this guy
@@ -1090,27 +1091,29 @@ plus1 arg list construction: build-plus-one-arity-function/real
     (define rng-ctcs (parsed->*-rng-ctcs a-parsed->*))
     (define chaperone-constructor (build-code-for-chaperone-constructor a-parsed->* method?))
     (syntax-property
-     #`(let (let-bindings ...)
-         (build--> '->*
-                   (list #,@(parsed->*-man-dom a-parsed->*))
-                   (list #,@(parsed->*-opt-dom a-parsed->*))
-                   '(mandatory-dom-kwd ...)
-                   (list mandatory-dom-kwd-ctc ...)
-                   '(optional-dom-kwd ...)
-                   (list optional-dom-kwd-ctc ...)
-                   #,rest-ctc
-                   #,(cond [pre #''pre] [pre/desc #''pre/desc] [else #'#f])
-                   #,(or pre pre/desc #'#f)
-                   #,(if rng-ctcs
-                         #`(list #,@(for/list ([rng-ctc (in-list (syntax->list rng-ctcs))])
-                                      (syntax-property rng-ctc
-                                                       'racket/contract:positive-position
-                                                       this->*)))
-                         #'#f)
-                   #,(cond [post #''post] [post/desc #''post/desc] [else #'#f])
-                   #,(or post post/desc #'#f)
-                   #,chaperone-constructor
-                   #,method?))
+     (quasisyntax/loc stx
+       (let (let-bindings ...)
+         #,(quasisyntax/loc stx
+             (build--> '->*
+                       (list #,@(parsed->*-man-dom a-parsed->*))
+                       (list #,@(parsed->*-opt-dom a-parsed->*))
+                       '(mandatory-dom-kwd ...)
+                       (list mandatory-dom-kwd-ctc ...)
+                       '(optional-dom-kwd ...)
+                       (list optional-dom-kwd-ctc ...)
+                       #,rest-ctc
+                       #,(cond [pre #''pre] [pre/desc #''pre/desc] [else #'#f])
+                       #,(or pre pre/desc #'#f)
+                       #,(if rng-ctcs
+                             #`(list #,@(for/list ([rng-ctc (in-list (syntax->list rng-ctcs))])
+                                          (syntax-property rng-ctc
+                                                           'racket/contract:positive-position
+                                                           this->*)))
+                             #'#f)
+                       #,(cond [post #''post] [post/desc #''post/desc] [else #'#f])
+                       #,(or post post/desc #'#f)
+                       #,chaperone-constructor
+                       #,method?))))
 
      'racket/contract:contract
      (vector this->*
@@ -1152,7 +1155,7 @@ plus1 arg list construction: build-plus-one-arity-function/real
   (define dom (coerce-contract '-> _dom))
   (define rng (coerce-contract '-> _rng))
   (cond
-    [(and (any/c? dom)
+    [(and (prop:any/c? dom)
           (flat-contract? rng)
           (eq? boolean? (flat-contract-predicate rng)))
      any/c->boolean-contract]
@@ -1257,7 +1260,7 @@ plus1 arg list construction: build-plus-one-arity-function/real
      ->void-contract]
     [(and (pair? regular-doms)
           (null? (cdr regular-doms))
-          (any/c? (car regular-doms))
+          (prop:any/c? (car regular-doms))
           (null? kwd-infos)
           (not rest-ctc)
           (not pre-cond)

@@ -108,7 +108,7 @@ static void main_init() {
       VIRTREG(tc, i) = FIX(0);
     }
 
-    S_thread_start_code_write(tc, 0, 0, NULL);
+    S_thread_start_code_write(tc, 0, 0, NULL, 0);
     p = S_code(tc, type_code, size_rp_header);
     CODERELOC(p) = S_relocation_table(0);
     CODENAME(p) = Sfalse;
@@ -122,7 +122,7 @@ static void main_init() {
         (uptr)TO_PTR(&RPHEADERTOPLINK(TO_PTR(&CODEIT(p, 0)))) - (uptr)p;
     S_protect(&S_G.dummy_code_object);
     S_G.dummy_code_object = p;
-    S_thread_end_code_write(tc, 0, 0, NULL);
+    S_thread_end_code_write(tc, 0, 0, NULL, 0);
 
     S_protect(&S_G.error_invoke_code_object);
     S_G.error_invoke_code_object = Snil;
@@ -273,6 +273,14 @@ static void idiot_checks() {
     fprintf(stderr, "sizeof(string_char) [%ld] != string_char_bytes [%d]\n", (long)sizeof(string_char), string_char_bytes);
     oops = 1;
   }
+  if (TYPE((ptr)0, type_untyped) != (ptr)0) {
+    fprintf(stderr, "tagging with type_untyped changes an address\n");
+    oops = 1;
+  }
+  if (record_ptr_offset != record_type_disp) {
+    fprintf(stderr, "record_ptr_offset != record_type_disp\n");
+    oops = 1;
+  }
   if (UNFIX(fixtest) != -1) {
     fprintf(stderr, "UNFIX operation failed\n");
     oops = 1;
@@ -331,7 +339,24 @@ static void idiot_checks() {
     /* parallel GC relies on not confusing a forward marker with code flags */
     fprintf(stderr, "code flags overlap with forwadr_marker\n");
     oops = 1;
-  } 
+  }
+
+  if ((reference_disp != bytevector_data_disp)
+      || (reference_disp != flvector_data_disp)) {
+    fprintf(stderr, "reference displacement does not match bytevector or flvector displacement\n");
+    oops = 1;
+  }
+  
+  if (reference_disp >= (allocation_segment_tail_padding
+                         /* to determine the minimum distince from the start of an
+                            alocated object to the end of its alloted space, take the
+                            smaller of the allocation alignment or sizeof(double), where
+                            the latter is relevant for a flonum that points into the
+                            imaginary half of an inexactnum */
+                         + ((byte_alignment < sizeof(double)) ? byte_alignment : sizeof(double)))) {
+    fprintf(stderr, "reference displacement can extend past the end of an allocation page\n");
+    oops = 1;
+  }
 
   if (oops) S_abnormal_exit();
 }

@@ -8,18 +8,29 @@
   (framed-markup (markup? . -> . markup?))
   (image-markup (any/c markup? . -> . markup?))
   (record-dc-datum (any/c natural-number/c natural-number/c . -> . record-dc-datum?))
+  (number (->* (number?) (#:exact-prefix (or/c 'always 'never 'when-necessary)
+                          #:inexact-prefix (or/c 'always 'never 'when-necessary)
+                          #:fraction-view (or/c #f 'mixed 'improper 'decimal))
+               markup?))
   (empty-markup markup?)
   (empty-line markup?)
   (horizontal (markup? ... . -> . markup?))
   (vertical (markup? ... . -> . markup?))
   (markup-transform-image-data ((any/c . -> . any/c) markup? . -> . markup?))))
    
-(require (rename-in simple-tree-text-markup/data (empty-markup make-empty-markup))
+(require (rename-in simple-tree-text-markup/data
+                    (empty-markup make-empty-markup)
+                    (number-markup make-number-markup))
          (only-in racket/list splitf-at append-map))
 
 (define empty-markup (make-empty-markup))
 
 (define empty-line (horizontal-markup '()))
+
+(define (number number
+                #:exact-prefix [exact-prefix 'never] #:inexact-prefix [inexact-prefix 'never]
+                #:fraction-view [fraction-view #f])
+  (make-number-markup number exact-prefix inexact-prefix fraction-view))
 
 ; flatten out nested markup elements, merge adjacent strings
 (define (normalize-horizontal markups)
@@ -94,4 +105,5 @@
        (framed-markup (recur (framed-markup-markup markup))))
       ((image-markup? markup)
        (image-markup (transform-image-data (image-markup-data markup))
-                     (recur (image-markup-alt-markup markup)))))))
+                     (recur (image-markup-alt-markup markup))))
+      ((number-markup? markup) markup))))

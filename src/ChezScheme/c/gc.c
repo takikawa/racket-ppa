@@ -223,7 +223,7 @@ static void record_dirty_segment PROTO((IGEN from_g, IGEN to_g, seginfo *si));
 static void setup_sweep_dirty PROTO((thread_gc *tgc));
 static uptr sweep_dirty_segments PROTO((thread_gc *tgc, seginfo **dirty_segments));
 static void resweep_dirty_weak_pairs PROTO((thread_gc *tgc));
-static void mark_typemod_data_object PROTO((thread_gc *tgc, ptr p, uptr len, seginfo *si));
+static void mark_untyped_data_object PROTO((thread_gc *tgc, ptr p, uptr len, seginfo *si));
 static void add_pending_guardian PROTO((ptr gdn, ptr tconc));
 static void add_trigger_guardians_to_recheck PROTO((ptr ls));
 static void add_ephemeron_to_pending PROTO((thread_gc *tgc, ptr p));
@@ -697,6 +697,24 @@ static void do_relocate_pure_in_owner(thread_gc *tgc, ptr *ppp) {
     }                                                                   \
   } while (0)
 
+#define relocate_reference(ppp, from_g) do {                    \
+    ptr* rPPP = ppp; ptr rPP = *rPPP;                           \
+    if (!FOREIGN_REFERENCEP(rPP)) {                             \
+      *rPPP = S_reference_to_object(rPP);                       \
+      relocate_impure(rPPP, from_g);                            \
+      *rPPP = S_object_to_reference(*rPPP);                     \
+    }                                                           \
+  } while (0)
+
+#define relocate_reference_dirty(ppp, YOUNGEST) do {            \
+    ptr* rPPP = ppp;                                            \
+    if (!FOREIGN_REFERENCEP(*rPPP)) {                           \
+      *rPPP = S_reference_to_object(*rPPP);                     \
+      relocate_dirty(rPPP, YOUNGEST);                           \
+      *rPPP = S_object_to_reference(*rPPP);                     \
+    }                                                           \
+  } while (0)
+
 #ifdef ENABLE_OBJECT_COUNTS
 # define is_counting_root(si, p) (si->counting_mask && (si->counting_mask[segment_bitmap_byte(p)] & segment_bitmap_bit(p)))
 #endif
@@ -704,6 +722,14 @@ static void do_relocate_pure_in_owner(thread_gc *tgc, ptr *ppp) {
 # define relocate_indirect(p) do { \
     ptr _P = p;                    \
     relocate_pure(&_P);            \
+  } while (0)
+
+# define relocate_reference_indirect(p) do {   \
+    ptr _P = p;                                \
+    if (!FOREIGN_REFERENCEP(_P)) {             \
+      _P = S_reference_to_object(_P);          \
+      relocate_pure(&_P);                      \
+    }                                          \
   } while (0)
 
 FORCEINLINE void check_triggers(thread_gc *tgc, seginfo *si) {
@@ -779,7 +805,7 @@ static ptr copy_stack(thread_gc *tgc, ptr old, iptr *length, iptr clength) {
 #ifndef NO_NEWSPACE_MARKS
   if (si->use_marks) {
     if (!marked(si, old)) {
-      mark_typemod_data_object(tgc, old, n, si);
+      mark_untyped_data_object(tgc, old, n, si);
     
 #ifdef ENABLE_OBJECT_COUNTS
       S_G.countof[newg][countof_stack] += 1;
@@ -805,7 +831,7 @@ static ptr copy_stack(thread_gc *tgc, ptr old, iptr *length, iptr clength) {
   if (n == 0) {
     return (ptr)0;
   } else {
-    find_gc_room(tgc, space_data, newg, typemod, n, new);
+    find_gc_room(tgc, space_data, newg, type_untyped, n, new);
     n = ptr_align(clength);
     /* warning: stack may have been left non-double-aligned by split_and_resize */
     memcpy_aligned(TO_VOIDP(new), TO_VOIDP(old), n);
@@ -870,7 +896,7 @@ ptr GCENTRY(ptr tc, ptr count_roots_ls) {
 
     GET_REAL_TIME(astart);
 
-    S_thread_start_code_write(tc, MAX_TG, 0, NULL);
+    S_thread_start_code_write(tc, MAX_TG, 0, NULL, 0);
 
    /* flush instruction cache: effectively clear_code_mod but safer */
     for (ls = S_threads; ls != Snil; ls = Scdr(ls)) {
@@ -1440,7 +1466,7 @@ ptr GCENTRY(ptr tc, ptr count_roots_ls) {
                 /* In backreference mode, we rely on sweep of the guardian
                    entry not registering any backreferences. Otherwise,
                    bogus pair pointers would get created. */
-                find_gc_room(tgc, space_pure, g, typemod, size_guardian_entry, p);
+                find_gc_room(tgc, space_pure, g, type_untyped, size_guardian_entry, p);
                 INITGUARDIANOBJ(p) = GUARDIANOBJ(ls);
                 INITGUARDIANREP(p) = rep;
                 INITGUARDIANTCONC(p) = tconc;
@@ -1679,7 +1705,7 @@ ptr GCENTRY(ptr tc, ptr count_roots_ls) {
     if (MAX_CG >= S_G.min_free_gen) S_free_chunks();
 
     S_flush_instruction_cache(tc);
-    S_thread_end_code_write(tc, MAX_TG, 0, NULL);
+    S_thread_end_code_write(tc, MAX_TG, 0, NULL, 0);
 
 #ifndef NO_DIRTY_NEWSPACE_POINTERS
     /* mark dirty those newspace cards to which we've added wrong-way pointers */
@@ -1914,7 +1940,7 @@ static iptr sweep_generation_pass(thread_gc *tgc) {
           ppn = pp + 1;
           p = *ppn;
           relocate_impure_help(ppn, p, from_g);
-          FLUSH_REMOTE(tgc, TYPE(TO_PTR(pp), type_pair));
+          FLUSH_REMOTE(tgc, TYPE(TO_PTR(pp), type_pair)); /* can always treat as a pair to sweep words */
           pp = ppn + 1;
         });
       SET_BACKREFERENCE(Sfalse);
@@ -1996,6 +2022,12 @@ static iptr sweep_generation_pass(thread_gc *tgc) {
           sweep(tgc, p, from_g);
           pp = TO_VOIDP((uptr)TO_PTR(pp) + size_object(p));
         });
+
+      sweep_space(space_reference_array, from_g, {
+          p = TYPE(TO_PTR(pp), type_typed_object);
+          pp = TO_VOIDP((uptr)TO_PTR(pp) + sweep_typed_object(tgc, p, from_g));
+        });
+
     }
 
     /* May add to the sweep stack: */
@@ -2028,7 +2060,7 @@ void enlarge_stack(thread_gc *tgc, ptr *stack, ptr *stack_start, ptr *stack_limi
   uptr new_sz = 2 * ((sz == 0) ? (uptr)sweep_stack_min_size : sz);
   ptr new_stack;
   if (new_sz - sz < grow_at_least) new_sz += grow_at_least;
-  find_gc_room(tgc, space_data, 0, typemod, ptr_align(new_sz), new_stack);
+  find_gc_room(tgc, space_data, 0, type_untyped, ptr_align(new_sz), new_stack);
   if (sz != 0)
     memcpy(TO_VOIDP(new_stack), TO_VOIDP(*stack_start), sz);
   tgc->bitmask_overhead[0] += ptr_align(new_sz);
@@ -2447,6 +2479,33 @@ static uptr sweep_dirty_segments(thread_gc *tgc, seginfo **dirty_segments) {
                     if (!dirty_si->marked_mask || marked(dirty_si, p))
                       youngest = check_dirty_ephemeron(tgc, p, youngest);
                     pp += size_ephemeron / sizeof(ptr);
+                  }
+                } else if (s == space_reference_array) {
+                  /* the same as space_impure and others above, but for object references */
+                  if (dirty_si->marked_mask) {
+                    while (pp < ppend) {
+                      /* handle two pointers at a time */
+                      if (marked(dirty_si, TO_PTR(pp))) {
+                        FLUSH_REMOTE_BLOCK
+                        relocate_reference_dirty(pp, youngest);
+                        ppn = pp + 1;
+                        relocate_reference_dirty(ppn, youngest);
+                        FLUSH_REMOTE(tgc, TYPE(TO_PTR(pp), type_pair)); /* can treat as a pair for resweep */
+                        pp = ppn + 1;
+                      } else {
+                        pp += 2;
+                      }
+                    }
+                  } else {
+                    while (pp < ppend && *pp != forward_marker) {
+                      /* handle two pointers at a time */
+                      FLUSH_REMOTE_BLOCK
+                      relocate_reference_dirty(pp, youngest);
+                      ppn = pp + 1;
+                      relocate_reference_dirty(ppn, youngest);
+                      FLUSH_REMOTE(tgc, TYPE(TO_PTR(pp), type_pair));
+                      pp = ppn + 1;
+                    }
                   }
                 } else {
                   S_error_abort("sweep_dirty(gc): unexpected space");
@@ -2951,7 +3010,7 @@ static s_thread_rv_t start_sweeper(void *_sweeper) {
   gc_sweeper *sweeper = _sweeper;
 
 #if !defined(WRITE_XOR_EXECUTE_CODE)
-  S_thread_start_code_write((ptr)0, static_generation, 0, NULL); /* never ended */
+  S_thread_start_code_write((ptr)0, static_generation, 0, NULL, 0); /* never ended */
 #endif
 
   (void)s_thread_mutex_lock(&sweep_mutex);

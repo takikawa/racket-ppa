@@ -32,7 +32,7 @@ EXTRA_COMPILE_DEPS =
 COMPILE_FILE = $(SCHEME) --script compile-file.ss $(UNSAFE_COMP) $(COMPRESS_COMP) $(DEBUG_COMP) $(CROSS_COMP) --dest "$(BUILDDIR)"
 COMPILE_FILE_DEPS = compile-file.ss include.ss place-register.ss $(EXTRA_COMPILE_DEPS)
 
-RACKET_SETUP_ARGS = false ../../bin/racket ../../bin/racket ../collects ../etc 0 false false 0 ""
+RACKET_SETUP_ARGS = false ../../bin/racket ../../bin/racket ../collects ../etc "" 0 false false 0 ""
 
 PRIMITIVES_TABLES = primitive/kernel.ss primitive/unsafe.ss primitive/flfxnum.ss \
                     primitive/paramz.ss primitive/extfl.ss primitive/network.ss \
@@ -259,7 +259,6 @@ future2-demo: $(BUILDDIR)rumble.$(CSO)
 	$(SCHEME) $(BUILDDIR)chezpart.$(CSO) $(BUILDDIR)rumble.$(CSO) demo/future2.ss
 
 RUMBLE_SRCS = rumble/virtual-register.ss \
-              rumble/layout.ss \
               rumble/check.ss \
 	      rumble/syntax-rule.ss \
               rumble/constant.ss \

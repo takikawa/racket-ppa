@@ -129,7 +129,7 @@ Returns @racket[#t] if @racket[hash] compares keys with @racket[eq?],
 @defproc[(hash-strong? [hash hash?]) boolean?]{
 
 Returns @racket[#t] if @racket[hash] retains its keys strongly,
-@racket[#f] if it retains keys strongly or like @tech{ephemerons}.
+@racket[#f] if it retains keys weakly or like @tech{ephemerons}.
 
 @history[#:added "8.0.0.10"]}
 
@@ -411,33 +411,69 @@ Returns @racket[#t] if @racket[hash] contains a value for the given
                        [key any/c]
                        [updater (any/c . -> . any/c)]
                        [failure-result failure-result/c
-                                       (lambda ()
-                                         (raise (make-exn:fail:contract ....)))])
+                        (lambda ()
+                          (raise (make-exn:fail:contract ....)))])
          void?]{
 
-Composes @racket[hash-ref] and @racket[hash-set!] to update an
-existing mapping in @racket[hash], where the optional
-@racket[failure-result] argument is used as in @racket[hash-ref] when
-no mapping exists for @racket[key] already. See the caveat above about
-concurrent updates.
+ Updates the value mapped by @racket[key] in @racket[hash] by applying @racket[updater] to the value.
+ The value returned by @racket[updater] becomes the new mapping for @racket[key], overwriting the
+ original value in @racket[hash].
 
-@see-also-caveats[]}
+ @(examples
+   #:eval the-eval
+   (eval:no-prompt
+    (define h (make-hash))
+    (hash-set! h 'a 5))
+
+   (hash-update! h 'a add1)
+   h)
+
+ The optional @racket[failure-result] argument is used when no mapping exists for @racket[key]
+ already, in the same manner as in @racket[hash-ref].
+
+ @(examples
+   #:eval the-eval
+   (eval:no-prompt
+    (define h (make-hash)))
+ 
+   (eval:error (hash-update! h 'b add1))
+   (hash-update! h 'b add1 0)
+   h)
+
+ @see-also-caveats[]}
 
 
 @defproc[(hash-update [hash (and/c hash? immutable?)]
                       [key any/c]
                       [updater (any/c . -> . any/c)]
                       [failure-result failure-result/c
-                                      (lambda ()
-                                        (raise (make-exn:fail:contract ....)))])
-          (and/c hash? immutable?)]{
+                       (lambda ()
+                         (raise (make-exn:fail:contract ....)))])
+         (and/c hash? immutable?)]{
 
-Composes @racket[hash-ref] and @racket[hash-set] to functionally
-update an existing mapping in @racket[hash], where the optional
-@racket[failure-result] argument is used as in @racket[hash-ref] when
-no mapping exists for @racket[key] already.
+ Functionally updates the value mapped by @racket[key] in @racket[hash] by applying @racket[updater]
+ to the value and returning a new hash table. The value returned by @racket[updater] becomes the new
+ mapping for @racket[key] in the returned hash table.
 
-@see-also-mutable-key-caveat[]}
+ @(examples
+   #:eval the-eval
+   (eval:no-prompt
+    (define h (hash 'a 5)))
+   
+   (hash-update h 'a add1))
+
+ The optional @racket[failure-result] argument is used when no mapping exists for @racket[key]
+ already, in the same manner as in @racket[hash-ref].
+
+ @(examples
+   #:eval the-eval
+   (eval:no-prompt
+    (define h (hash)))
+   
+   (eval:error (hash-update h 'b add1))
+   (hash-update h 'b add1 0))
+
+ @see-also-mutable-key-caveat[]}
 
 
 @defproc[(hash-remove! [hash (and/c hash? (not/c immutable?))]
@@ -591,8 +627,8 @@ about modifying @racket[hash] within @racket[proc].
 Returns the number of keys mapped by @racket[hash].
 
 For the @tech{CS} implementation of Racket, the result is always
-computed in time and atomically. For the @tech{BC} implementation of
-Racket, the result is computed in constant time and atomically only if
+computed in constant time and atomically. For the @tech{BC} implementation
+of Racket, the result is computed in constant time and atomically only if
 @racket[hash] does not retain keys weakly or like an @tech{ephemeron},
 otherwise, a traversal is required to count the keys.}
 

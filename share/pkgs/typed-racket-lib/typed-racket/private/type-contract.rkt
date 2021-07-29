@@ -5,27 +5,54 @@
 (require
  "../utils/utils.rkt"
  syntax/parse
- (rep type-rep prop-rep object-rep fme-utils)
- (utils tc-utils prefab identifier)
- (env type-name-env row-constraint-env lexical-env)
- (rep core-rep rep-utils free-ids type-mask values-rep
-      base-types numeric-base-types free-variance)
- (types resolve utils printer match-expanders union subtype)
- (prefix-in t: (types abbrev numeric-tower subtype))
- (private parse-type syntax-properties)
+ "../rep/type-rep.rkt"
+ "../rep/prop-rep.rkt"
+ "../rep/object-rep.rkt"
+ "../rep/fme-utils.rkt"
+
+ "../utils/tc-utils.rkt"
+ "../utils/prefab.rkt"
+ "../utils/identifier.rkt"
+
+ "../env/type-name-env.rkt"
+ "../env/row-constraint-env.rkt"
+ "../env/lexical-env.rkt"
+
+ "../rep/core-rep.rkt"
+ "../rep/rep-utils.rkt"
+ "../rep/free-ids.rkt"
+ "../rep/type-mask.rkt"
+ "../rep/values-rep.rkt"
+ "../rep/base-types.rkt"
+ "../rep/numeric-base-types.rkt"
+ "../rep/free-variance.rkt"
+ "../types/resolve.rkt"
+ "../types/utils.rkt"
+ "../types/printer.rkt"
+ "../types/match-expanders.rkt"
+ "../types/union.rkt"
+ "../types/subtype.rkt"
+ (prefix-in t: (combine-in "../types/abbrev.rkt"
+                           "../types/numeric-tower.rkt"
+                           "../types/subtype.rkt"))
+ "parse-type.rkt"
+ "syntax-properties.rkt"
  racket/match racket/syntax racket/list
  racket/format
  racket/string
  racket/set
  syntax/flatten-begin
- (only-in (types abbrev) -Bottom -Boolean)
- (static-contracts instantiate structures combinators constraints)
+ (only-in "../types/abbrev.rkt" -Bottom -Boolean)
+ "../static-contracts/instantiate.rkt"
+ "../static-contracts/structures.rkt"
+ "../static-contracts/combinators.rkt"
+ "../static-contracts/constraints.rkt"
  (only-in (submod typed-racket/static-contracts/instantiate internals) compute-constraints)
  ;; TODO make this from contract-req
  (prefix-in c: racket/contract)
  (contract-req)
  (for-syntax racket/base)
- (for-template racket/base racket/contract (utils any-wrap)))
+ (for-template racket/base racket/contract "../utils/any-wrap.rkt"))
 
 (provide
   (c:contract-out
@@ -42,6 +69,8 @@
 ;; submod for testing
 (module* test-exports #f (provide type->contract))
 
+
+(define num-existentials (make-parameter 0))
 ;; has-contrat-def-property? : Syntax -> Boolean
 (define (has-contract-def-property? stx)
   (syntax-parse stx
@@ -322,7 +351,7 @@
         (loop t (flip-side typed-side) recursive-values))
       (define (t->sc/both t #:recursive-values (recursive-values recursive-values))
         (loop t 'both recursive-values))
-      (define (t->sc/fun t) (t->sc/function t fail typed-side recursive-values loop #f))
+      (define (t->sc/fun t #:maybe-existential [opt-exi #f]) (t->sc/function t fail typed-side recursive-values loop #f #:maybe-existential opt-exi))
       (define (t->sc/meth t) (t->sc/method t fail typed-side recursive-values loop))
 
       (define (struct->recursive-sc name-base key flds sc-ctor)
@@ -539,37 +568,13 @@
        ;; TODO: this is not quite right for case->
        [(Prompt-Tagof: s (Fun: (list (Arrow: ts _ _ _))))
         (prompt-tag/sc (map t->sc ts) (list (t->sc s)))]
-       [(Some: (list n) (Fun: (list li-arrs ...)))
-        (define (occur? t)
-          (if (or (not t) (empty? t)) #f
-              (set-member? (free-vars-names (free-vars* t)) n)))
-
-        (define (err)
-          (fail #:reason
-                "contract generation only supports Some Type in this form: (Some (X) (-> ty1 ... (-> X ty ... ty2) : X))"))
-        
-        (define (get-dom-rng li-arrs)
-          (match li-arrs
-            [(list (Arrow: (list dom) rst kw
-                           (Values: (list (Result: (and (Fun: (list (Arrow: (list-rest (F: n1) a ... _) rst_i kw_i r))) rng)
-                                                   (PropSet: (TypeProp: _ (F: n1)) _) _)))))
-             #:when (and (not (ormap occur? (list rst kw rst_i kw_i)))
-                         (eq? n1 n))
-             (values dom rng)]
-            [_ (err)]))
-        
-        (define-values (dom rng) (get-dom-rng li-arrs))
-        (define/with-syntax name n)
-        (define lhs (t->sc/neg dom))
-        (define eq-name (flat/sc #'(eq/c name)))
-        (define rhs (t->sc rng #:recursive-values (hash-set recursive-values n
-                                                            (same eq-name))))
-        (exist/sc (list #'name) lhs rhs)]
+       [(Some: (list n) (? Fun? t-body))
+        (t->sc/fun t-body #:maybe-existential n)]
        [(F: v)
         (cond
           [(string-prefix? (symbol->string v) "self-")
            (if (not (from-untyped? typed-side))
-               ;; if self is in negative position, we can't generate a contract yet. 
+               ;; if self is in negative position, we can't generate a contract yet.
                (fail #:reason "contract generation not supported for Self")
                any/sc)]
           [else (triple-lookup
@@ -741,14 +746,14 @@
         (define-values (a prop-name) (syntax-local-value/immediate orig-id (λ () (values #t orig-id))))
         (match-define (Struct-Property: _ pred?) (lookup-id-type/lexical prop-name))
         ;; if original-name is only set when the type is added via require/typed
-        
+
         ;; the original-name of `prop-name` is its original referece in the unexpanded program.
         (define real-prop-var (or (syntax-property prop-name 'original-name) prop-name))
 
         ;; a property is wrapped so we need its original reference
         (define real-pred-var (or (syntax-property pred? 'original-name) (syntax-e pred?)))
-        
-        ;; the `pred?` could be provided to a property through require/typed, 
+
+        ;; the `pred?` could be provided to a property through require/typed,
         ;; so we need to check if it is produced by the property
         (flat/sc #`(flat-named-contract '#,real-pred-var
                                         (lambda (x)
@@ -797,11 +802,33 @@
         (fail #:reason "contract generation not supported for this type")]))))
 
 
-(define (t->sc/function f fail typed-side recursive-values loop method?)
+(define (t->sc/function f fail typed-side recursive-values loop method? #:maybe-existential [opt-exi #f])
   (define (t->sc t #:recursive-values (recursive-values recursive-values))
     (loop t typed-side recursive-values))
   (define (t->sc/neg t #:recursive-values (recursive-values recursive-values))
     (loop t (flip-side typed-side) recursive-values))
+
+  (define (arr-params->exist/sc exi dom rst kw rng prop+type)
+    (define (occur? t)
+      (if (or (not t) (empty? t)) #f
+          (set-member? (free-vars-names (free-vars* t)) exi)))
+
+    (match* (rng prop+type)
+      [((Fun: (list (Arrow: (list-rest (F: n1) a ... _) rst_i kw_i r))) (F: n1))
+       #:when (and (not (ormap occur? (list rst kw rst_i kw_i)))
+                   (eq? n1 exi))
+       (void)]
+      [(_ _) (fail #:reason
+                   "contract generation only supports Some Type in this form: (Some (X) (-> ty1 ... (-> X ty ... ty2) : X)) or (-> ty1 ... (Some (X) (-> X ty ... ty2) : X)))")])
+
+    (define/with-syntax name exi)
+    (define lhs (t->sc/neg dom))
+    (define eq-name (flat/sc #'(eq/c name)))
+    (define rhs (t->sc rng
+                       #:recursive-values (hash-set recursive-values exi
+                                                    (same eq-name))))
+    (exist/sc (list #'name) lhs rhs))
+
 
   ;; handle-arrow-range : Arr (-> Static-Contact) -> Static-Contract
   ;; Match the range of an arr and determine if a contract can be generated
@@ -854,62 +881,84 @@
        ;; TODO sufficient condition, but may not be necessary
        [(has-optional-args? arrows)
         (define first-arrow (first arrows))
-       (define last-arrow (last arrows))
-       (define (convert-arrow)
-         (match-define (Arrow: first-dom _ kws
-                               (Values: (list (Result: rngs _ _) ...)))
-           first-arrow)
-         (define rst (Arrow-rst last-arrow))
-         ;; kws and rng same for all arrs
-         (define last-dom (Arrow-dom last-arrow))
-         (define mand-args (map t->sc/neg first-dom))
-         (define opt-args (map t->sc/neg (drop last-dom (length first-dom))))
-         (define-values (mand-kws opt-kws)
+        (define last-arrow (last arrows))
+        (define (convert-arrow)
+          (match-define (Arrow: first-dom _ kws
+                                (Values: (list (Result: rngs _ _) ...)))
+            first-arrow)
+          (define rst (Arrow-rst last-arrow))
+          ;; kws and rng same for all arrs
+          (define last-dom (Arrow-dom last-arrow))
+          (define mand-args (map t->sc/neg first-dom))
+          (define opt-args (map t->sc/neg (drop last-dom (length first-dom))))
+          (define-values (mand-kws opt-kws)
+            (let*-values ([(mand-kws opt-kws) (partition-kws kws)])
+              (values (map conv mand-kws)
+                      (map conv opt-kws))))
+          (define range (map t->sc rngs))
+          (define rest (and rst (t->sc/neg rst)))
+          (function/sc (from-typed? typed-side) (process-dom mand-args) opt-args mand-kws opt-kws rest range))
+        (handle-arrow-range first-arrow convert-arrow)]
+       [else
+        (define/match (convert-single-arrow arr)
+          [((Arrow: (list dom) rst kws (Values: (list (Result: rng (PropSet: (TypeProp: _ prop+type) _) _ 0)))))
+           #:when opt-exi
+           (let-values ([(mand-kws opt-kws) (partition-kws kws)])
+             (arr-params->exist/sc opt-exi dom rst kws rng prop+type))]
+
+          [((Arrow: (list dom) rst kws (Values: (list (ExistentialResult: rng (PropSet: (TypeProp: _ prop+type) _) _ vars)))))
            (let*-values ([(mand-kws opt-kws) (partition-kws kws)])
-             (values (map conv mand-kws)
-                     (map conv opt-kws))))
-         (define range (map t->sc rngs))
-         (define rest (and rst (t->sc/neg rst)))
-         (function/sc (from-typed? typed-side) (process-dom mand-args) opt-args mand-kws opt-kws rest range))
-       (handle-arrow-range first-arrow convert-arrow)]
-      [else
-       (define ((f case->) a)
-         (define (convert-arr arr)
-           (match arr
-             [(Arrow: dom rst kws (Values: (list (Result: rngs _ _) ...)))
-              (let-values ([(mand-kws opt-kws) (partition-kws kws)])
-                ;; Garr, I hate case->!
-                (when (and (not (empty? kws)) case->)
-                  (fail #:reason (~a "cannot generate contract for case function type"
-                                     " with optional keyword arguments")))
-                (if case->
-                  (arr/sc (process-dom (map t->sc/neg dom))
-                          (and rst (t->sc/neg rst))
-                          (map t->sc rngs))
-                  (function/sc
-                    (from-typed? typed-side)
-                    (process-dom (map t->sc/neg dom))
-                    null
-                    (map conv mand-kws)
-                    (map conv opt-kws)
-                    (match rst
-                      [(? Rest?) (t->sc/neg rst)]
-                      [(RestDots: dty dbound)
-                       (listof/sc
-                        (t->sc/neg dty
-                                   #:recursive-values
-                                   (hash-set recursive-values dbound (same any/sc))))]
-                      [_ #f])
-                    (map t->sc rngs))))]))
-         (handle-arrow-range a (λ () (convert-arr a))))
-       (define arities
-         (for/list ([t (in-list arrows)]) (length (Arrow-dom t))))
-       (define maybe-dup (check-duplicates arities))
-       (when maybe-dup
-         (fail #:reason (~a "function type has two cases of arity " maybe-dup)))
-       (if (= (length arrows) 1)
-           ((f #f) (first arrows))
-           (case->/sc (map (f #t) arrows)))])]
+             (arr-params->exist/sc (F-n (car vars)) dom rst kws rng prop+type))]
+
+          [((Arrow: dom rst kws (Values: (list (Result: rngs _ _ n-exiss) ...))))
+           (define-values (mand-kws opt-kws) (partition-kws kws))
+           (function/sc
+                 (from-typed? typed-side)
+                 (process-dom (map t->sc/neg dom))
+                 null
+                 (map conv mand-kws)
+                 (map conv opt-kws)
+                 (match rst
+                   [(? Rest?) (t->sc/neg rst)]
+                   [(RestDots: dty dbound)
+                    (listof/sc
+                     (t->sc/neg dty
+                                #:recursive-values
+                                (hash-set recursive-values dbound (same any/sc))))]
+                   [_ #f])
+                 (map t->sc rngs))])
+
+        (define/match (convert-one-arrow-in-many arr)
+          [((Arrow: dom rst kws (Values: (list (Result: rngs _ _ n-exis) ...))))
+           (let-values ([(mand-kws opt-kws) (partition-kws kws)])
+             ;; Garr, I hate case->!
+             (when (and (not (empty? kws)))
+               (fail #:reason (~a "cannot generate contract for case function type"
+                                  " with optional keyword arguments")))
+             (when (ormap (lambda (n-exi)
+                            (> n-exi 0))
+                          n-exis)
+               (fail #:reason (~a "cannot generate contract for case function type with existentials")))
+
+             (arr/sc (process-dom (map t->sc/neg dom))
+                     (and rst (t->sc/neg rst))
+                     (map t->sc rngs)))])
+
+        (define arities
+          (for/list ([t (in-list arrows)]) (length (Arrow-dom t))))
+
+        (define maybe-dup (check-duplicates arities))
+        (when maybe-dup
+          (fail #:reason (~a "function type has two cases of arity " maybe-dup)))
+
+        (if (= (length arrows) 1)
+            (handle-arrow-range (first arrows)
+                                (lambda ()
+                                  (convert-single-arrow (first arrows))))
+            (case->/sc (map (lambda (arr)
+                              (handle-arrow-range arr (lambda ()
+                                                        (convert-one-arrow-in-many arr))))
+                            arrows)))])]
     [(DepFun/ids: ids dom pre rng)
      (define (continue)
        (match rng
@@ -1159,12 +1208,12 @@
 (module numeric-contracts racket/base
   (require
     "../utils/utils.rkt"
-    (static-contracts combinators)
+    "../static-contracts/combinators.rkt"
     (for-template
       racket/base
       racket/contract
       (submod ".." predicates)
-      (prefix-in t: (types numeric-predicates))))
+      (prefix-in t: "../types/numeric-predicates.rkt")))
   (provide (all-defined-out))
 
   (define-syntax-rule (numeric/sc name body) (flat/sc #'body))

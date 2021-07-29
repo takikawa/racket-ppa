@@ -846,6 +846,7 @@
 (define (do-break-thread t kind check-t)
   ((atomically
     (cond
+      [(thread-dead? t) void]
       [(thread-forward-break-to t)
        => (lambda (other-t)
             (lambda () (do-break-thread other-t kind check-t)))]
@@ -1033,7 +1034,11 @@
                                         ;; abandon:
                                         (lambda () (set! receive void))
                                         ;; retry (was interrupted, but not abandoned):
-                                        (lambda () (add-wakeup-callback!))))])))
+                                        (lambda ()
+                                          (add-wakeup-callback!)
+                                          (if (is-mail? t)
+                                              (values self #t)
+                                              (values #f #f)))))])))
   #:reflection-name 'thread-receive-evt)
 
 (define/who (thread-receive-evt)

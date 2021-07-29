@@ -115,7 +115,7 @@
           [prefix drracket:get/extend: drracket:get/extend^]
           [prefix drracket:module-overview: drracket:module-overview^]
           [prefix drracket:tools: drracket:tools^]
-          [prefix drracket:init: drracket:init^]
+          [prefix drracket:init: drracket:init/int^]
           [prefix drracket:module-language: drracket:module-language/int^]
           [prefix drracket:module-language-tools: drracket:module-language-tools^]
           [prefix drracket:modes: drracket:modes^]
@@ -4389,7 +4389,7 @@
                                                   'drscheme:language-menu-title)]
                                           [parent mb]))
         (define ((send-method method) _1 _2)
-          (define text (get-focus-object))
+          (define text (get-edit-target-object))
           (when (is-a? text racket:text<%>)
             (method text)))
         (define (show/hide-capability-menus)

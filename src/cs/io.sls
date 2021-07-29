@@ -125,6 +125,10 @@
       (syntax-case stx (ref)
         [(_ (ref _) v) #'(address->ptr v)]
         [(_ _ v) #'v]))
+
+    (define-syntax (wrap-result/allow-callbacks stx)
+      (syntax-case stx ()
+        [(_ t v) #'(call-enabling-ffi-callbacks (lambda () (wrap-result t v)))]))
     
     (meta define (convert-function stx)
           (syntax-case stx ()
@@ -133,7 +137,10 @@
                            [(arg-type ...) (map convert-type #'(orig-arg-type ...))]
                            [(conv ...) (if (#%memq 'blocking (map syntax->datum #'(flag ...)))
                                            #'(__collect_safe)
-                                           #'())])
+                                           #'())]
+                           [wrap-result (if (#%memq 'msg-queue (map syntax->datum #'(flag ...)))
+                                            #'wrap-result/allow-callbacks
+                                            #'wrap-result)])
                #'(let ([proc (foreign-procedure conv ... (rktio-lookup 'name)
                                                 (arg-type ...)
                                                 ret-type)])
@@ -494,6 +501,7 @@
                  (cond
                   [(eqv? 0 (get-thread-id)) (go)]
                   [else
+                   (ensure-virtual-registers)
                    (post-as-asynchronous-callback go)]))))])
       (let ([callable (foreign-callable __collect_safe glib-log-message (string int string) void)])
         (values
@@ -532,7 +540,7 @@
   (include "include.ss")
   (include-generated "io.scm")
 
-   ;; Initialize:
+  ;; Initialize:
   (set-log-system-message! (lambda (level str)
                              (1/log-message (|#%app| 1/current-logger) level str #f)))
   (set-error-display-eprintf! (lambda (fmt . args)

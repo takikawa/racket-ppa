@@ -6,9 +6,15 @@
          racket/promise
          "../utils/utils.rkt"
          (for-template racket/base)
-         (types numeric-tower utils type-table)
-         (rep type-rep) (env mvar-env)
-         (optimizer utils logging float-complex unboxed-tables))
+         "../types/numeric-tower.rkt"
+         "../types/utils.rkt"
+         "../types/type-table.rkt"
+         "../rep/type-rep.rkt"
+         "../env/mvar-env.rkt"
+         "utils.rkt"
+         "logging.rkt"
+         "float-complex.rkt"
+         "unboxed-tables.rkt")
 
 (provide unboxed-let-opt-expr)
 
@@ -72,30 +78,35 @@
          ;; This ensures that unboxable variables defined in later clauses are detected before
          ;; optimization starts.
          (define-syntax-class unboxed-clause
-            #:attributes (bindings)
-            (pattern v:unboxable-let-clause?
-              #:with (real-binding imag-binding) (binding-names)
-              #:do [(add-unboxed-var! #'v.id #'real-binding #'imag-binding)]
-              #:attr bindings
-                (delay
-                  (syntax-parse #'v
-                    [((id:id) c:unboxed-float-complex-opt-expr)
-                     #:do [(log-opt "unboxed let bindings" arity-raising-opt-msg)]
-                     #'(c.bindings ...
-                        ((real-binding) c.real-binding)
-                        ((imag-binding) c.imag-binding))])))
-            (pattern v:unboxable-fun-clause?
-              #:attr bindings
-                (delay
-                  (syntax-parse #'v
-                    [c:unbox-fun-clause
-                     #'(c.bindings ...)])))
-            (pattern v
-              #:attr bindings
-                (delay
-                  (syntax-parse #'v
-                    [(vs rhs:opt-expr)
-                     #'((vs rhs.opt))]))))
+           #:attributes (bindings)
+           ;; if rhs is unreachable, do nothing
+           (pattern (~and v (lhs rhs:ignore-table^))
+                    #:attr bindings
+                    (delay
+                      #'(v)))
+           (pattern v:unboxable-let-clause?
+                    #:with (real-binding imag-binding) (binding-names)
+                    #:do [(add-unboxed-var! #'v.id #'real-binding #'imag-binding)]
+                    #:attr bindings
+                    (delay
+                      (syntax-parse #'v
+                        [((id:id) c:unboxed-float-complex-opt-expr)
+                         #:do [(log-opt "unboxed let bindings" arity-raising-opt-msg)]
+                         #'(c.bindings ...
+                                       ((real-binding) c.real-binding)
+                                       ((imag-binding) c.imag-binding))])))
+           (pattern v:unboxable-fun-clause?
+                    #:attr bindings
+                    (delay
+                      (syntax-parse #'v
+                        [c:unbox-fun-clause
+                         #'(c.bindings ...)])))
+           (pattern v
+                    #:attr bindings
+                    (delay
+                      (syntax-parse #'v
+                        [(vs rhs:opt-expr)
+                         #'((vs rhs.opt))]))))
          (define-syntax-class unboxed-clauses
            #:attributes (bindings)
            (pattern (clauses:unboxed-clause ...)

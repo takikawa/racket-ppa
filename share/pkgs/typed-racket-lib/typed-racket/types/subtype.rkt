@@ -1,19 +1,33 @@
 #lang racket/base
-(require (except-in "../utils/utils.rkt" infer)
+(require "../utils/utils.rkt"
          racket/match racket/function racket/lazy-require
+         racket/promise
          racket/list
          syntax/id-set
          (contract-req)
-         (rep type-rep prop-rep object-rep
-              core-rep type-mask values-rep rep-utils
-              free-variance rep-switch)
-         (utils tc-utils prefab identifier)
-         (only-in (env type-env-structs)
+         "../rep/type-rep.rkt"
+         "../rep/prop-rep.rkt"
+         "../rep/object-rep.rkt"
+         "../rep/core-rep.rkt"
+         "../rep/type-mask.rkt"
+         "../rep/values-rep.rkt"
+         "../rep/rep-utils.rkt"
+         "../rep/free-variance.rkt"
+         "../rep/rep-switch.rkt"
+         "../utils/tc-utils.rkt"
+         "../utils/prefab.rkt"
+         "../utils/identifier.rkt"
+         (only-in "../env/type-env-structs.rkt"
                   with-lexical-env
                   with-naively-extended-lexical-env
                   lexical-env)
-         (types utils resolve match-expanders current-seen
-                numeric-tower substitute signatures)
+         "utils.rkt"
+         "resolve.rkt"
+         "match-expanders.rkt"
+         "current-seen.rkt"
+         "numeric-tower.rkt"
+         "substitute.rkt"
+         "signatures.rkt"
          (for-syntax racket/base syntax/parse racket/sequence)
          "../infer/fail.rkt"
          (except-in (rename-in "abbrev.rkt"
@@ -393,14 +407,32 @@
 (define/cond-contract (subresult* A res1 res2)
   (-> (listof (cons/c Type? Type?)) Result? Result?
       any/c)
-  (match* (res1 res2)
-    [((Result: t1 (PropSet: p1+ p1-) o1)
-      (Result: t2 (PropSet: p2+ p2-) o2))
-     (and (or (equal? o1 o2) (Empty? o2) (not o2))
-          (subtype-seq A
-                       (subtype* t1 t2 o1)
-                       (prop-subtype* p1+ p2+)
-                       (prop-subtype* p1- p2-)))]))
+  (define-values (t1 p1+ p1- o1 t2 p2+ p2- o2)
+    (match* (res1 res2)
+      [((Result: t1 (PropSet: p1+ p1-) o1 0)
+        (Result: t2 (PropSet: p2+ p2-) o2 0))
+       (values t1 p1+ p1- o1 t2 p2+ p2- o2)]
+      [((Result: t1 (PropSet: p1+ p1-) o1 0)
+        (ExistentialResult: t2 (PropSet: p2+ p2-) o2 vars))
+       (define (sub rep)
+         (subst self-var (car vars) rep))
+
+       (values (sub t1) (sub p1+) p1- o1 t2 p2+ p2- o2)]
+      [((ExistentialResult: t1 (PropSet: p1+ p1-) o1 p-m-vars)
+        (ExistentialResult: t2 (PropSet: p2+ p2-) o2 vars))
+       (define (sub rep)
+         (for/fold ([acc rep])
+                   ([v1 (in-list vars)]
+                    [v2 (in-list p-m-vars)])
+           (subst (F-n v2) v1 acc)))
+
+       (values (sub t1) (sub p1+) p1- o1 t2 p2+ p2- o2)]))
+
+  (and (or (equal? o1 o2) (Empty? o2) (not o2))
+            (subtype-seq A
+                         (subtype* t1 t2 o1)
+                         (prop-subtype* p1+ p2+)
+                         (prop-subtype* p1- p2-))))
 
 ;;************************************************************
 ;; Type Subtyping
@@ -1172,7 +1204,7 @@
      [(SequenceTop:) A]
      [(Sequence: (list seq-t)) (subtype* A elem1 seq-t)]
      [_ (continue<: A t1 t2 obj)])]
-  [(case: Some (Some: _ _)) #f]  
+  [(case: Some (Some: _ _)) #f]
   [(case: Struct (Struct: nm1 parent1 flds1 proc1 _ _ properties))
    (match t2
      ;; Avoid resolving things that refer to different structs.

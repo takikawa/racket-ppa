@@ -111,7 +111,7 @@
           [prefix drracket:language: drracket:language/int^]
           [prefix drracket:unit: drracket:unit^]
           [prefix drracket:rep: drracket:rep/int^]
-          [prefix drracket:init: drracket:init^]
+          [prefix drracket:init: drracket:init/int^]
           [prefix drracket:module-language-tools: drracket:module-language-tools/int^]
           [prefix drracket:modes: drracket:modes^]
           [prefix drracket: drracket:interface^])
@@ -2710,7 +2710,8 @@
   (define module-language-parallel-lock-client
     (compile-lock->parallel-lock-client
      module-language-compile-lock
-     (current-custodian)))
+     (current-custodian)
+     current-parallel-lock-shutdown-evt))
   
   ;; in-module-language : (or/c top-level-window<%> #f) -> module-language-settings or #f
   (define (in-module-language tlw)

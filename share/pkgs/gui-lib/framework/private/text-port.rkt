@@ -20,6 +20,7 @@
           [prefix icon: framework:icon^]
           [prefix editor: framework:editor^]
           [prefix srcloc-snip: framework:srcloc-snip^]
+          [prefix number-snip: framework:number-snip^]
           [prefix text: text-misc^])
   (export text-port^)
 
@@ -577,8 +578,14 @@
                  ((framed-markup? markup)
                   (send text insert (markup->snip (framed-markup-markup markup) style #t)))
                  ((image-markup? markup)
-                  (send text insert (image-markup->snip markup style)))))
-             
+                  (send text insert (image-markup->snip markup style)))
+                 ((number-markup? markup)
+                  (send text insert
+                        (number-snip:number->string/snip (number-markup-number markup)
+                                                         #:exact-prefix (number-markup-exact-prefix markup)
+                                                         #:inexact-prefix (number-markup-inexact-prefix markup)
+                                                         #:fraction-view (number-markup-fraction-view markup))))))
+                  
              (define (image-markup->snip markup style)
                (let ((data (image-markup-data markup)))
                  (cond
@@ -590,7 +597,7 @@
                         snip))
                    (else
                     (markup->snip (image-markup-alt-markup markup) style #f)))))
-             
+
              (define (insert-srcloc-markup srcloc-markup text style)
                (let ((start (send text get-end-position)))
                  (insert-markup (srcloc-markup-markup srcloc-markup) text style #t)
@@ -661,7 +668,13 @@
                  [(framed-markup? markup)
                   (insert-str/snp! (markup->snip (framed-markup-markup markup) style #t) style)]
                  [(image-markup? markup)
-                  (insert-str/snp! (image-markup->snip markup style) style)]))
+                  (insert-str/snp! (image-markup->snip markup style) style)]
+                 [(number-markup? markup)
+                  (insert-str/snp! (number-snip:number->string/snip (number-markup-number markup)
+                                                                    #:exact-prefix (number-markup-exact-prefix markup)
+                                                                    #:inexact-prefix (number-markup-inexact-prefix markup)
+                                                                    #:fraction-view (number-markup-fraction-view markup))
+                                   style)]))
              
              (define thing (car fst))
              (define style (cdr fst))
@@ -1044,8 +1057,7 @@
          ;; and image-core:image? should be safe-- there is no user
          ;; code in those images to fail
          [(or (regexp-match? #rx"plot-snip%" str)
-              (regexp-match? #rx"pict3d%" str)
-              (regexp-match? #rx"struct:object:dynamic-snip%" str)) ;; this is for frtime and only in the release (not in git head)
+              (regexp-match? #rx"pict3d%" str))
           (write-special (send value copy) port)]
          [else
           (write-special (make-snip-special (send value copy)) port)])])

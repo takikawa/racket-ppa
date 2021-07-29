@@ -24,6 +24,7 @@
                     setup/link
                     compiler/compiler
                     compiler/module-suffix
+                    compiler/find-exe
                     launcher/launcher
                     compiler/sig
                     launcher/launcher-sig
@@ -543,6 +544,10 @@ Optional @filepath{info.rkt} fields trigger additional actions by
 
      @item{@racket['no-search] : Build the document without a search
            box.}
+
+     @item{@racket['every-main-layer] : With @racket['main-doc],
+           indicates that the document should be rendered separately
+           at every installation layer (see @secref["layered-install"]).}
 
     ]
 
@@ -1413,14 +1418,18 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
 @defproc[(get-main-collects-search-dirs) (listof path?)]{
   Returns a list of paths to installation @filepath{collects}
-  directories, including the result of @racket[find-collects-dir].
+  directories, normally including the result of @racket[find-collects-dir].
   These directories are normally included in the result of
   @racket[(current-library-collection-paths)], but a
   @envvar{PLTCOLLECTS} setting or change to the parameter may cause
   them to be omitted. Any other path in
   @racket[(current-library-collection-paths)] is treated as
   user-specific. The directories indicated by the returned paths may
-  or may not exist.}
+  or may not exist.
+
+  The main-collections search path can be configured via
+  @racket['collects-search-dirs] in @filepath{config.rktd} (see
+  @secref["config-file"]).}
 
 @defproc[(find-config-dir) (or/c path? #f)]{
   Returns a path to the installation's @filepath{etc} directory, which
@@ -1450,6 +1459,8 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
   order. (Normally, the result includes the result of
   @racket[(find-links-file)], which is where new installation-wide
   links are installed by @exec{raco link} or @racket[links].) The
+  result of @racket[find-user-links-file]
+  is @emph{not} added to the returned list. The
   files indicated by the returned paths may or may not exist.
 
   @see-config[links-search-files]}
@@ -1473,7 +1484,8 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
   Returns a list of paths to the directories containing packages in
   installation scope.  (Normally, the result includes the result of
   @racket[(find-pkgs-dir)], which is where new packages are installed
-  by @exec{raco pkg install}.) The directories indicated by the returned
+  by @exec{raco pkg install}.) The result of @racket[find-user-pkgs-dir]
+  is @emph{not} added to the returned list. The directories indicated by the returned
   paths may or may not exist.
 
   @see-config[pkgs-search-dirs]}
@@ -1499,6 +1511,13 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
   parameter is @racket[#t].
 
   @see-config[doc-search-dirs]}
+
+@defproc[(get-doc-extra-search-dirs) (listof path?)]{
+  Like @racket[get-doc-search-dirs], but refrains from adding
+  @racket[(find-doc-dir)] and @racket[(find-user-doc-dir)] to the
+  underlying @racket['doc-search-dirs] configuration.
+
+  @history[#:added "8.1.0.6"]}
 
 @defproc[(find-lib-dir) (or/c path? #f)]{
   Returns a path to the installation's @filepath{lib} directory, which contains
@@ -1543,6 +1562,13 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
   @history[#:added "6.9.0.1"]}
 
+@defproc[(get-cross-lib-extra-search-dirs) (listof path?)]{
+  Like @racket[get-cross-lib-search-dirs], but refrains from adding
+  @racket[(find-lib-dir)] and @racket[(find-user-lib-dir)] to the
+  underlying @racket['lib-search-dirs] configuration.
+
+  @history[#:added "8.1.0.6"]}
+
 @defproc[(find-dll-dir) (or/c path? #f)]{
   Returns a path to the directory that contains DLLs for use with the
   current executable (e.g., @filepath{libracket.dll} on Windows).
@@ -1576,6 +1602,27 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
   indicated by the returned path may or may not exist.
 
   @user-path["share"]}
+
+@defproc[(get-share-search-dirs) (listof path?)]{
+  Returns a list of paths to search for files that are normally in a
+  @filepath{share} directory. 
+
+  Unless it is configured otherwise, the result includes any
+  non-@racket[#f] result of @racket[(find-share-dir)] and
+  @racket[(find-user-share-dir)]---but the latter is included only if
+  the value of the @racket[use-user-specific-search-paths] parameter
+  is @racket[#t].
+
+  @see-config[share-search-dirs]
+
+  @history[#:added "8.1.0.6"]}
+
+@defproc[(get-share-extra-search-dirs) (listof path?)]{
+  Like @racket[get-share-search-dirs], but refrains from adding
+  @racket[(find-share-dir)] and @racket[(find-user-share-dir)] to the
+  underlying @racket['share-search-dirs] configuration.
+
+  @history[#:added "8.1.0.6"]}
 
 @defproc[(find-include-dir) (or/c path? #f)]{
   Returns a path to the installation's @filepath{include} directory, which
@@ -1626,6 +1673,34 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
   @user-path[#f]}
 
+@defproc[(get-console-bin-search-dirs) (listof path?)]{
+  Analogous to @racket[get-share-search-dirs], but for paths to search
+  for executables such as @exec{racket}.
+
+  @see-config[bin-search-dirs]
+
+  @history[#:added "8.1.0.6"]}
+
+@defproc[(get-console-bin-extra-search-dirs) (listof path?)]{
+  Analogous to @racket[get-share-extra-search-dirs] for the underlying
+  @racket['bin-search-dirs] configuration.
+
+  @history[#:added "8.1.0.6"]}
+
+@defproc[(get-gui-bin-search-dirs) (listof path?)]{
+  Analogous to @racket[get-share-search-dirs], but for paths to search
+  for executables such as @exec{gracket}.
+
+  @see-config[gui-bin-search-dirs]
+
+  @history[#:added "8.1.0.6"]}
+
+@defproc[(get-gui-bin-extra-search-dirs) (listof path?)]{
+  Analogous to @racket[get-share-extra-search-dirs] for the underlying
+  @racket['gui-bin-search-dirs] configuration.
+
+  @history[#:added "8.1.0.6"]}
+
 @defproc[(find-apps-dir) (or/c path? #f)]{
   Returns a path to the installation's directory @filepath{.desktop}
   files (for Unix). The result is @racket[#f] if no such directory
@@ -1649,6 +1724,20 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
   indicated by the returned path may or may not exist.
 
   @user-path["man"]}
+
+@defproc[(get-man-search-dirs) (listof path?)]{
+  Analogous to @racket[get-share-search-dirs], but for paths to search
+  for man pages.
+
+  @see-config[man-search-dirs]
+
+  @history[#:added "8.1.0.6"]}
+
+@defproc[(get-man-extra-search-dirs) (listof path?)]{
+  Analogous to @racket[get-share-extra-search-dirs] for the underlying
+  @racket['man-search-dirs] configuration.
+
+  @history[#:added "8.1.0.6"]}
 
 @defproc[(get-doc-search-url) string?]{
   Returns a string that is used by the documentation system, augmented
@@ -1705,14 +1794,7 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
   @racket[find-addon-tethered-gui-bin-dir], is @racket[#f] instead of
   a path.
 
-  The intent of this protocol is to support a kind of sandbox: an
-  installation that is more specific than user-specific, and where
-  copies of executables such as @exec{racket} serve as entry points
-  into the sandbox. Assuming that the addon directory is set to a
-  directory other than the user's default addon directory when
-  @exec{raco setup} creates the executable copies, then further
-  package build and setup operations through the entry points will be
-  confined to the sandbox and not affect a user's default environment.
+  See @secref["tethered-install"] for more information.
 
   @history[#:added "6.5.0.2"]}
 
@@ -1726,7 +1808,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
   @filepath{config.rktd} in the @racket[(find-config-dir)] directory
   (see @secref["config-file"]) and triggers executables that are
   tethered only to a particular value of @racket[(find-config-dir)].
- 
+
+  See @secref["tethered-install"] for more information.
+
   @history[#:added "6.5.0.2"]}
  
 @; ------------------------------------------------------------------------
@@ -2152,6 +2236,13 @@ the regexp matches @racket[(path->string sys-lib-subpath)],
 
 @section[#:tag "cross-system"]{API for Cross-Platform Configuration}
 
+See @other-doc[#:indirect @exec{raco cross} '(lib
+"raco/private/cross/raco-cross.scrbl")] for information about
+@exec{raco cross}, a tool that is provided by the
+@filepath{raco-cross} package as a convenient interface to
+cross-compilation for Racket. The underlying API documented here
+supports @exec{raco cross} and other tools.
+
 @defmodule[setup/cross-system]{The @racketmodname[setup/cross-system]
 library provides functions for querying the system properties of a
 destination platform, which can be different than the current platform
@@ -2163,7 +2254,7 @@ does not match the running Racket's information, then the
 @racketmodname[setup/cross-system] module infers that Racket is being
 run in cross-installation mode.
 
-For example, if an in-place Racket @tech[#:doc guide-doc]{BC}
+For example, if an in-place Racket @BC
 installation for a different platform resides at @nonterm{cross-dir},
 then running Racket BC as
 
@@ -2177,7 +2268,7 @@ libraries need to run to perform the requested @exec{raco pkg} action
 (e.g., when installing built packages), or as long as the current
 platform's installation already includes those libraries.
 
-For Racket @tech[#:doc guide-doc]{CS}, cross compilation is more
+For Racket @CS, cross compilation is more
 complicated, because Racket CS @filepath{.zo} files are
 platform-specific:
 
@@ -2363,3 +2454,155 @@ point already exists in @racket[(find-user-doc-dir)].
 
 @history[#:changed "1.1" @list{Added the @racket[skip-user-doc-check?] argument.}]
 }
+
+@; ------------------------------------------------------------------------
+
+@section[#:tag "layered-install"]{Layered Installations}
+
+A typical Racket configuration includes two layers: an
+@defterm{installation} layer and a @defterm{user} layer. The intent is
+that the @defterm{installation} layer is read-only to all users of a
+system, while the @defterm{user} layer allows each individual user to
+install additional packages that extend the @defterm{installation}
+layer. The @defterm{installation} layer is intended not only to be
+read-only, but to not change after users start installing in their own
+layers.
+
+In an environment where Racket itself is under development, the
+@defterm{installation} layer will change. In that setting, if the
+@defterm{user} layer is used at all, care must be taken to not create
+conflicts for the user layer when modifying the installation
+layer---or else the user layer must be repaired on occasion.
+
+By default, @exec{raco setup} updates both layers whenever it is run;
+if a user does not have write permission the installation, @exec{raco
+setup} with no arguments is all but certain to report permission
+errors. The actions of @exec{raco setup} can be constrained to the
+@defterm{user} layer by supplying the @DFlag{avoid-main} argument, or
+@exec{raco setup} can be constrained to the @defterm{installation}
+layer by using the @DFlag{no-user} argument. When @exec{raco pkg}
+performs setup actions, it effectively supplies one of the other of
+those based on the package's scope (and @exec{raco pkg} refuses to
+operate on both scopes/layers at once).
+
+The @defterm{user} layer is always both user- and version-specific.
+More precisely, it is specific to the user and an installation's name,
+where the installation's name is typically its version number.
+However, the name of an installation can be changed through the
+@racket['installation] setting in @filepath{config.rktd} (see
+@secref["config-file"]). Setting an installation name changes the
+directory where packages and executables reside within
+@racket[(find-system-path 'addon-dir)]. The result of
+@racket[(find-system-path 'addon-dir)] itself can be changed through
+@racket['addon-dir] in @filepath{config.rktd}.
+
+The @defterm{installation} and @defterm{user} configuration layers can
+be generalized to multiple layers by setting search paths in
+@filepath{config.rktd}. These search paths essentially treat the layer
+closest to @defterm{user} as the @defterm{installation} layer that
+might be adjusted by @exec{raco setup} and @exec{raco pkg}, but search
+paths can chain to an existing (unchanging) implementation in much the
+same way that @defterm{user} chains to @defterm{installation}. To
+build a new layer, create new @filepath{config.rktd} that is like the
+underlying layer's @filepath{config.rktd}, but
+@;
+@itemlist[
+
+ @item{each of @racket['lib-dir], @racket['share-dir],
+       @racket['links-file], @racket['pkgs-dir], @racket['bin-dir],
+       @racket['gui-bin-dir], @racket['apps-dir], @racket['doc-dir],
+       and @racket['man-dir] is a new directory or file; and}
+
+ @item{the corresponding search lists @racket['lib-search-dirs],
+       @racket['share-search-dirs], @racket['links-search-files],
+       @racket['pkgs-search-dirs], @racket['bin-search-dirs],
+       @racket['gui-bin-search-dirs], (no @racket['apps-dir] search
+       needed), @racket['doc-search-dirs], and
+       @racket['man-search-dirs] each add the old directory or file to
+       the search list just after @racket[#f]; note that the default
+       for each search list is @racket[(list #f)].}
+
+]
+@;
+There is no argument to @exec{raco setup} that is analogous to
+@DFlag{avoid-main} to avoid modifying nested layer; instead, nested
+layers are expected to be fully set up so that @exec{raco setup}
+need not change them. When @exec{raco setup} would otherwise install
+an executable into the directory configured as @racket['bin-dir], it
+consults the @racket['bin-search-dirs] list to check whether the
+executable is already installed in one of those directories, and if so,
+it will refrain from creating a copy in the new layer. The same
+search-list check also applies to native libraries, shared files, and
+man pages, but with the additional check that the file to install matches
+the one that is already installed.
+
+The default path to @filepath{config.rktd} is hardwired within a
+@exec{racket} executable. In some cases, it can make sense for the
+innermost layer's configuration to point to another layer, perhaps
+because the filesystem provides an indirection. For example, on Unix,
+a Racket installation in @filepath{/usr} might reasonably configure
+the @defterm{installation} layer's directories to be in
+@filepath{/usr/local} with @filepath{/usr} directories included in the
+search lists.
+
+To use @exec{racket} with a new @filepath{config.rktd}, you can supply
+the @DFlag{config} or @DFlag{G} flag to @exec{racket} or set the
+@envvar{PLTCONFIGDIR} environment variable to point to the directory
+containing @filepath{config.rktd}. Alternatively, you can create a
+@tech{tethered} layer that creates replacement executables like
+@exec{racket} that are hardwired to the layer's configuration
+directory.
+
+@; ------------------------------------------------------------------------
+
+@section[#:tag "tethered-install"]{Tethered Installations}
+
+A @deftech{tethered} installation of Racket is a layer (see
+@secref["layered-install"]) that includes a wrapper executable for
+every executable across the installation's layers. Each wrapper
+executable points back to the new layer's @filepath{config.rktd} (see
+@secref["config-file"]) without the use of a @envvar{PLTCONFIGDIR}
+environment variable or @DFlag{config} flag. In other words, a
+tethered installation provides executables such as @exec{racket},
+@exec{raco}, and @exec{drracket} that are tied to the layer. Tethering
+thus helps to create a layer of installation that behaves in a more
+self-contained way, but with minimal duplication of the underlying
+layers.
+
+Tethering works at either a @defterm{user} or @defterm{installation}
+layer:
+
+@itemlist[
+
+ @item{A @defterm{user} layer with tethering is represented by a fresh
+       directory @nonterm{addon-dir} and a
+       @filepath{@nonterm{addon-dir}/etc/config.rktd} file that maps
+       @racket['addon-tethered-console-bin-dir] to
+       @nonterm{tethered-bin-dir} and
+       @racket['addon-tethered-gui-bin-dir] to
+       @nonterm{tethered-gui-bin-dir}. Initialize the tethered layer
+       with
+
+       @commandline{racket -A @nonterm{addon-dir} -l- raco setup --avoid-main}}
+
+ @item{An @defterm{installation} layer with tethering is like a one
+       without tethering (see @secref["layered-install"]), but where
+       the layer's @filepath{@nonterm{layer-dir}/etc/config.rktd} file
+       that maps @racket['config-tethered-console-bin-dir] to
+       @nonterm{tethered-bin-dir} and
+       @racket['config-tethered-gui-bin-dir] to
+       @nonterm{tethered-gui-bin-dir}. The @racket['bin-dir] and
+       @racket['gui-bin-dir] configurations can point to the same
+       directories, but executables are not specifically created there by
+       @exec{raco setup}. Initialize the tethered layer with
+
+       @commandline{racket -G @nonterm{layer-dir}/etc -l- raco setup}}
+
+]
+
+In either case, initialization creates tethered executables in the
+directories @nonterm{tethered-bin-dir} and
+@nonterm{tethered-gui-bin-dir}. Thereafter, tethered executables like
+@exec{@nonterm{tethered-bin-dir}/racket} and
+@exec{@nonterm{tethered-bin-dir}/raco} can be used to work with the
+tethered layer.

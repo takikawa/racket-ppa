@@ -192,15 +192,43 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
         }
         else if (TYPEP(tf, mask_bytevector, type_bytevector))
         {
-          ISPC p_spc = space_data;
           {
-            uptr sz = size_bytevector((Sbytevector_length(p)));
+            ISPC p_at_spc = si->space;
+            if (p_at_spc == space_reference_array)
             {
-              uptr p_sz = sz;
-              find_gc_room(tgc, p_spc, tg, type_typed_object, p_sz, new_p);
-              memcpy_aligned(&BYTEVECTOR_TYPE(new_p), &BYTEVECTOR_TYPE(p), sz);
-              S_G.countof[tg][countof_bytevector] += 1;
-              S_G.bytesof[tg][countof_bytevector] += p_sz;
+              ISPC p_spc = space_reference_array;
+              {
+                uptr sz = size_bytevector((Sbytevector_length(p)));
+                {
+                  uptr p_sz = sz;
+                  find_gc_room(tgc, p_spc, tg, type_typed_object, p_sz, new_p);
+                  BYTEVECTOR_TYPE(new_p) = (uptr)tf;
+                  {
+                    uptr len = Sbytevector_reference_length(p);
+                    memcpy_aligned(&BVIT(new_p, 0), &BVIT(p, 0), ptr_bytes * len);
+                    if ((len & 1) == 0)
+                    {
+                      INITBVREFIT(new_p, len) = FIX(0);
+                    }
+                    S_G.countof[tg][countof_bytevector] += 1;
+                    S_G.bytesof[tg][countof_bytevector] += p_sz;
+                  }
+                }
+              }
+            }
+            else
+            {
+              ISPC p_spc = space_data;
+              {
+                uptr sz = size_bytevector((Sbytevector_length(p)));
+                {
+                  uptr p_sz = sz;
+                  find_gc_room(tgc, p_spc, tg, type_typed_object, p_sz, new_p);
+                  memcpy_aligned(&BYTEVECTOR_TYPE(new_p), &BYTEVECTOR_TYPE(p), sz);
+                  S_G.countof[tg][countof_bytevector] += 1;
+                  S_G.bytesof[tg][countof_bytevector] += p_sz;
+                }
+              }
             }
           }
         }
@@ -413,7 +441,38 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
       {
         {
           ISPC p_at_spc = si->space;
-          if (p_at_spc == space_ephemeron)
+          if (p_at_spc < space_weakpair)
+          {
+            ISPC p_spc = space_impure;
+            {
+              ptr cdr_p = Scdr(p);
+              if ((cdr_p != p) && (((TYPEBITS(cdr_p)) == type_pair) && (((ptr_get_segment(cdr_p)) == (ptr_get_segment(p))) && (((FWDMARKER(cdr_p)) != forward_marker) && (!(si -> marked_mask))))))
+              {
+                uptr p_sz = 2 * (size_pair);
+                find_gc_room(tgc, p_spc, tg, type_pair, p_sz, new_p);
+                {
+                  ptr new_cdr_p = (ptr)(((uptr)new_p) + size_pair);
+                  INITCAR(new_p) = INITCAR(p);
+                  INITCDR(new_p) = new_cdr_p;
+                  INITCAR(new_cdr_p) = INITCAR(cdr_p);
+                  INITCDR(new_cdr_p) = INITCDR(cdr_p);
+                  FWDMARKER(cdr_p) = forward_marker;
+                  FWDADDRESS(cdr_p) = new_cdr_p;
+                  ADD_BACKREFERENCE_FROM(new_cdr_p, new_p, tg);
+                  S_G.countof[tg][countof_pair] += 2;
+                }
+              }
+              else
+              {
+                uptr p_sz = size_pair;
+                find_gc_room(tgc, p_spc, tg, type_pair, p_sz, new_p);
+                INITCAR(new_p) = INITCAR(p);
+                INITCDR(new_p) = INITCDR(p);
+                S_G.countof[tg][countof_pair] += 1;
+              }
+            }
+          }
+          else if (p_at_spc == space_ephemeron)
           {
             ISPC p_spc = space_ephemeron;
             {
@@ -459,34 +518,7 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
           }
           else
           {
-            ISPC p_spc = space_impure;
-            {
-              ptr cdr_p = Scdr(p);
-              if ((cdr_p != p) && (((TYPEBITS(cdr_p)) == type_pair) && (((ptr_get_segment(cdr_p)) == (ptr_get_segment(p))) && (((FWDMARKER(cdr_p)) != forward_marker) && (!(si -> marked_mask))))))
-              {
-                uptr p_sz = 2 * (size_pair);
-                find_gc_room(tgc, p_spc, tg, type_pair, p_sz, new_p);
-                {
-                  ptr new_cdr_p = (ptr)(((uptr)new_p) + size_pair);
-                  INITCAR(new_p) = INITCAR(p);
-                  INITCDR(new_p) = new_cdr_p;
-                  INITCAR(new_cdr_p) = INITCAR(cdr_p);
-                  INITCDR(new_cdr_p) = INITCDR(cdr_p);
-                  FWDMARKER(cdr_p) = forward_marker;
-                  FWDADDRESS(cdr_p) = new_cdr_p;
-                  ADD_BACKREFERENCE_FROM(new_cdr_p, new_p, tg);
-                  S_G.countof[tg][countof_pair] += 2;
-                }
-              }
-              else
-              {
-                uptr p_sz = size_pair;
-                find_gc_room(tgc, p_spc, tg, type_pair, p_sz, new_p);
-                INITCAR(new_p) = INITCAR(p);
-                INITCDR(new_p) = INITCDR(p);
-                S_G.countof[tg][countof_pair] += 1;
-              }
-            }
+            S_error_abort("misplaced pair");
           }
         }
       }
@@ -717,6 +749,26 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
       }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
       {
+        {
+          ISPC p_at_spc = SPACE(p);
+          if (p_at_spc == space_reference_array)
+          {
+            {
+              uptr len = Sbytevector_reference_length(p);
+              {
+                uptr idx, p_len = len;
+                ptr *p_p = (ptr*)&BVIT(p, 0);
+                for (idx = 0; idx < p_len; idx++)
+                {
+                  relocate_reference(&(p_p[idx]), from_g);
+                }
+              }
+            }
+          }
+          else
+          {
+          }
+        }
       }
       else if ((iptr)tf == type_tlc)
       {
@@ -828,14 +880,14 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                           {
                             if (!(marked(t_si, t)))
                             {
-                              mark_typemod_data_object(tgc, t, n, t_si);
+                              mark_untyped_data_object(tgc, t, n, t_si);
                             }
                           }
                           else
                           {
                             {
                               ptr oldt = t;
-                              find_gc_room(tgc, space_data, from_g, typemod, n, t);
+                              find_gc_room(tgc, space_data, from_g, type_untyped, n, t);
                               memcpy_aligned(TO_VOIDP(t), TO_VOIDP(oldt), n);
                             }
                           }
@@ -1041,7 +1093,12 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
     {
       {
         ISPC p_at_spc = SPACE(p);
-        if (p_at_spc == space_ephemeron)
+        if (p_at_spc < space_weakpair)
+        {
+          relocate_impure(&INITCAR(p), from_g);
+          relocate_impure(&INITCDR(p), from_g);
+        }
+        else if (p_at_spc == space_ephemeron)
         {
           add_ephemeron_to_pending(tgc, p);
         }
@@ -1051,8 +1108,8 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
         }
         else
         {
-          relocate_impure(&INITCAR(p), from_g);
-          relocate_impure(&INITCDR(p), from_g);
+          relocate_reference(&INITCAR(p), from_g);
+          relocate_reference(&INITCDR(p), from_g);
         }
       }
     }
@@ -1379,6 +1436,26 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
       }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
       {
+        {
+          ISPC p_at_spc = SPACE(p);
+          if (p_at_spc == space_reference_array)
+          {
+            {
+              uptr len = Sbytevector_reference_length(p);
+              {
+                uptr idx, p_len = len;
+                ptr *p_p = (ptr*)&BVIT(p, 0);
+                for (idx = 0; idx < p_len; idx++)
+                {
+                  relocate_reference_indirect((p_p[idx]));
+                }
+              }
+            }
+          }
+          else
+          {
+          }
+        }
       }
       else if ((iptr)tf == type_tlc)
       {
@@ -1635,7 +1712,12 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
     {
       {
         ISPC p_at_spc = SPACE(p);
-        if (p_at_spc == space_ephemeron)
+        if (p_at_spc < space_weakpair)
+        {
+          relocate_indirect(INITCAR(p));
+          relocate_indirect(INITCDR(p));
+        }
+        else if (p_at_spc == space_ephemeron)
         {
         }
         else if (p_at_spc == space_weakpair)
@@ -1644,8 +1726,7 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
         }
         else
         {
-          relocate_indirect(INITCAR(p));
-          relocate_indirect(INITCDR(p));
+          S_error_abort("misplaced pair");
         }
       }
     }
@@ -1935,6 +2016,26 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
       }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
       {
+        {
+          ISPC p_at_spc = SPACE(p);
+          if (p_at_spc == space_reference_array)
+          {
+            {
+              uptr len = Sbytevector_reference_length(p);
+              {
+                uptr idx, p_len = len;
+                ptr *p_p = (ptr*)&BVIT(p, 0);
+                for (idx = 0; idx < p_len; idx++)
+                {
+                  relocate_reference_dirty(&(p_p[idx]), youngest);
+                }
+              }
+            }
+          }
+          else
+          {
+          }
+        }
       }
       else if ((iptr)tf == type_tlc)
       {
@@ -1997,7 +2098,12 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
     {
       {
         ISPC p_at_spc = SPACE(p);
-        if (p_at_spc == space_ephemeron)
+        if (p_at_spc < space_weakpair)
+        {
+          relocate_dirty(&INITCAR(p), youngest);
+          relocate_dirty(&INITCDR(p), youngest);
+        }
+        else if (p_at_spc == space_ephemeron)
         {
           add_ephemeron_to_pending(tgc, p);
         }
@@ -2007,8 +2113,8 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
         }
         else
         {
-          relocate_dirty(&INITCAR(p), youngest);
-          relocate_dirty(&INITCDR(p), youngest);
+          relocate_reference_dirty(&INITCAR(p), youngest);
+          relocate_reference_dirty(&INITCDR(p), youngest);
         }
       }
     }
@@ -2707,14 +2813,14 @@ static void sweep_code_object(thread_gc *tgc, ptr p, IGEN from_g)
                       {
                         if (!(marked(t_si, t)))
                         {
-                          mark_typemod_data_object(tgc, t, n, t_si);
+                          mark_untyped_data_object(tgc, t, n, t_si);
                         }
                       }
                       else
                       {
                         {
                           ptr oldt = t;
-                          find_gc_room(tgc, space_data, from_g, typemod, n, t);
+                          find_gc_room(tgc, space_data, from_g, type_untyped, n, t);
                           memcpy_aligned(TO_VOIDP(t), TO_VOIDP(oldt), n);
                         }
                       }
@@ -2800,10 +2906,24 @@ static uptr size_object(ptr p)
     }
     else if (TYPEP(tf, mask_bytevector, type_bytevector))
     {
-      uptr sz = size_bytevector((Sbytevector_length(p)));
       {
-        uptr p_sz = sz;
-        return p_sz;
+        ISPC p_at_spc = SPACE(p);
+        if (p_at_spc == space_reference_array)
+        {
+          uptr sz = size_bytevector((Sbytevector_length(p)));
+          {
+            uptr p_sz = sz;
+            return p_sz;
+          }
+        }
+        else
+        {
+          uptr sz = size_bytevector((Sbytevector_length(p)));
+          {
+            uptr p_sz = sz;
+            return p_sz;
+          }
+        }
       }
     }
     else if ((iptr)tf == type_tlc)
@@ -2876,7 +2996,12 @@ static uptr size_object(ptr p)
   {
     {
       ISPC p_at_spc = SPACE(p);
-      if (p_at_spc == space_ephemeron)
+      if (p_at_spc < space_weakpair)
+      {
+        uptr p_sz = size_pair;
+        return p_sz;
+      }
+      else if (p_at_spc == space_ephemeron)
       {
         uptr p_sz = size_ephemeron;
         return p_sz;
@@ -2888,8 +3013,7 @@ static uptr size_object(ptr p)
       }
       else
       {
-        uptr p_sz = size_pair;
-        return p_sz;
+        S_error_abort("misplaced pair");
       }
     }
   }
@@ -3205,40 +3329,85 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
       }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
       {
-        uptr sz = size_bytevector((Sbytevector_length(p)));
         {
-          uptr p_sz = sz;
-          si->marked_mask[segment_bitmap_byte(p)] |= segment_bitmap_bit(p);
+          ISPC p_at_spc = si->space;
+          if (p_at_spc == space_reference_array)
           {
-            uptr addr = (uptr)UNTYPE(p, type_typed_object);
-            uptr seg = addr_get_segment(addr);
-            uptr end_seg = addr_get_segment(addr + p_sz - 1);
-            if (seg == end_seg) {
-              si->marked_count += p_sz;
-            } else {
-              seginfo *mark_si; IGEN g;
-              si->marked_count += ((uptr)build_ptr(seg+1,0)) - addr;
-              seg++;
-              while (seg < end_seg) {
-                mark_si = SegInfo(seg);
-                g = mark_si->generation;
-                if (!fully_marked_mask[g]) init_fully_marked_mask(tgc, g);
-                mark_si->marked_mask = fully_marked_mask[g];
-                mark_si->marked_count = bytes_per_segment;
-                seg++;
-              }
-              mark_si = SegInfo(end_seg);
+            uptr sz = size_bytevector((Sbytevector_length(p)));
+            {
+              uptr p_sz = sz;
               {
-                if (!mark_si->marked_mask) {
-                  init_mask(tgc, mark_si->marked_mask, mark_si->generation, 0);
+                uptr addr = (uptr)UNTYPE(p, type_typed_object);
+                if (addr_get_segment(addr) == addr_get_segment(addr + p_sz - 1))
+                {
+                  si->marked_count += p_sz;
+                  {
+                    uptr offset = 0;
+                    while (offset < p_sz) {
+                      ptr mark_p = (ptr)((uptr)p + offset);
+                      si->marked_mask[segment_bitmap_byte(mark_p)] |= segment_bitmap_bit(mark_p);
+                      offset += byte_alignment;
+                    }
+                  }
                 }
-                /* no need to set a bit: it's enough to have made `marked_mask` non-NULL */
-                mark_si->marked_count += addr + p_sz - (uptr)build_ptr(end_seg,0);
+                else
+                {
+                  uptr offset = 0;
+                  while (offset < p_sz) {
+                    ptr mark_p = (ptr)((uptr)p + offset);
+                    seginfo *mark_si = SegInfo(ptr_get_segment(mark_p));
+                    if (!mark_si->marked_mask) {
+                      init_mask(tgc, mark_si->marked_mask, mark_si->generation, 0);
+                    }
+                    mark_si->marked_mask[segment_bitmap_byte(mark_p)] |= segment_bitmap_bit(mark_p);
+                    mark_si->marked_count += byte_alignment;
+                    offset += byte_alignment;
+                  }
+                }
               }
+              push_sweep(p);
+              S_G.countof[TARGET_GENERATION(si)][countof_bytevector] += 1;
+              S_G.bytesof[TARGET_GENERATION(si)][countof_bytevector] += p_sz;
             }
           }
-          S_G.countof[TARGET_GENERATION(si)][countof_bytevector] += 1;
-          S_G.bytesof[TARGET_GENERATION(si)][countof_bytevector] += p_sz;
+          else
+          {
+            uptr sz = size_bytevector((Sbytevector_length(p)));
+            {
+              uptr p_sz = sz;
+              si->marked_mask[segment_bitmap_byte(p)] |= segment_bitmap_bit(p);
+              {
+                uptr addr = (uptr)UNTYPE(p, type_typed_object);
+                uptr seg = addr_get_segment(addr);
+                uptr end_seg = addr_get_segment(addr + p_sz - 1);
+                if (seg == end_seg) {
+                  si->marked_count += p_sz;
+                } else {
+                  seginfo *mark_si; IGEN g;
+                  si->marked_count += ((uptr)build_ptr(seg+1,0)) - addr;
+                  seg++;
+                  while (seg < end_seg) {
+                    mark_si = SegInfo(seg);
+                    g = mark_si->generation;
+                    if (!fully_marked_mask[g]) init_fully_marked_mask(tgc, g);
+                    mark_si->marked_mask = fully_marked_mask[g];
+                    mark_si->marked_count = bytes_per_segment;
+                    seg++;
+                  }
+                  mark_si = SegInfo(end_seg);
+                  {
+                    if (!mark_si->marked_mask) {
+                      init_mask(tgc, mark_si->marked_mask, mark_si->generation, 0);
+                    }
+                    /* no need to set a bit: it's enough to have made `marked_mask` non-NULL */
+                    mark_si->marked_count += addr + p_sz - (uptr)build_ptr(end_seg,0);
+                  }
+                }
+              }
+              S_G.countof[TARGET_GENERATION(si)][countof_bytevector] += 1;
+              S_G.bytesof[TARGET_GENERATION(si)][countof_bytevector] += p_sz;
+            }
+          }
         }
       }
       else if ((iptr)tf == type_tlc)
@@ -3430,7 +3599,15 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
     {
       {
         ISPC p_at_spc = si->space;
-        if (p_at_spc == space_ephemeron)
+        if (p_at_spc < space_weakpair)
+        {
+          uptr p_sz = size_pair;
+          si->marked_mask[segment_bitmap_byte(p)] |= segment_bitmap_bit(p);
+          si->marked_count += p_sz;
+          push_sweep(p);
+          S_G.countof[TARGET_GENERATION(si)][countof_pair] += 1;
+        }
+        else if (p_at_spc == space_ephemeron)
         {
           uptr p_sz = size_ephemeron;
           add_ephemeron_to_pending(tgc, p);
@@ -3448,11 +3625,7 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
         }
         else
         {
-          uptr p_sz = size_pair;
-          si->marked_mask[segment_bitmap_byte(p)] |= segment_bitmap_bit(p);
-          si->marked_count += p_sz;
-          push_sweep(p);
-          S_G.countof[TARGET_GENERATION(si)][countof_pair] += 1;
+          S_error_abort("misplaced pair");
         }
       }
     }
@@ -3683,7 +3856,7 @@ static IBOOL object_directly_refers_to_self(ptr p)
           ptr *p_p = &INITVECTIT(p, 0);
           for (idx = 0; idx < p_len; idx++)
           {
-            if (p_p[idx] == p) return 1;
+            if (p == p_p[idx]) return 1;
           }
         }
       }
@@ -3695,7 +3868,7 @@ static IBOOL object_directly_refers_to_self(ptr p)
           ptr *p_p = &INITSTENVECTIT(p, 0);
           for (idx = 0; idx < p_len; idx++)
           {
-            if (p_p[idx] == p) return 1;
+            if (p == p_p[idx]) return 1;
           }
         }
       }
@@ -3710,6 +3883,26 @@ static IBOOL object_directly_refers_to_self(ptr p)
       }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
       {
+        {
+          ISPC p_at_spc = SPACE(p);
+          if (p_at_spc == space_reference_array)
+          {
+            {
+              uptr len = Sbytevector_reference_length(p);
+              {
+                uptr idx, p_len = len;
+                ptr *p_p = (ptr*)&BVIT(p, 0);
+                for (idx = 0; idx < p_len; idx++)
+                {
+                  if (p == S_maybe_reference_to_object(p_p[idx])) return 1;
+                }
+              }
+            }
+          }
+          else
+          {
+          }
+        }
       }
       else if ((iptr)tf == type_tlc)
       {
@@ -3800,7 +3993,12 @@ static IBOOL object_directly_refers_to_self(ptr p)
     {
       {
         ISPC p_at_spc = SPACE(p);
-        if (p_at_spc == space_ephemeron)
+        if (p_at_spc < space_weakpair)
+        {
+          if (p == INITCAR(p)) return 1;
+          if (p == INITCDR(p)) return 1;
+        }
+        else if (p_at_spc == space_ephemeron)
         {
         }
         else if (p_at_spc == space_weakpair)
@@ -3809,8 +4007,7 @@ static IBOOL object_directly_refers_to_self(ptr p)
         }
         else
         {
-          if (p == INITCAR(p)) return 1;
-          if (p == INITCDR(p)) return 1;
+          S_error_abort("misplaced pair");
         }
       }
     }
@@ -3829,7 +4026,7 @@ static IBOOL object_directly_refers_to_self(ptr p)
           ptr *p_p = &CLOSIT(p, 0);
           for (idx = 0; idx < p_len; idx++)
           {
-            if (p_p[idx] == p) return 1;
+            if (p == p_p[idx]) return 1;
           }
         }
       }
@@ -3848,7 +4045,7 @@ static IBOOL object_directly_refers_to_self(ptr p)
   return 0;
 }
 
-static void mark_typemod_data_object(thread_gc *tgc, ptr p, uptr p_sz, seginfo *si)
+static void mark_untyped_data_object(thread_gc *tgc, ptr p, uptr p_sz, seginfo *si)
 {
   if (!si->marked_mask) {
     init_mask(tgc, si->marked_mask, si->generation, 0);
@@ -4048,10 +4245,39 @@ static void measure(thread_gc *tgc, ptr p)
     }
     else if (TYPEP(tf, mask_bytevector, type_bytevector))
     {
-      uptr sz = size_bytevector((Sbytevector_length(p)));
       {
-        uptr p_sz = sz;
-        measure_total += p_sz;
+        ISPC p_at_spc = SPACE(p);
+        if (p_at_spc == space_reference_array)
+        {
+          uptr sz = size_bytevector((Sbytevector_length(p)));
+          {
+            uptr p_sz = sz;
+            measure_total += p_sz;
+            {
+              uptr len = Sbytevector_reference_length(p);
+              {
+                uptr idx, p_len = len;
+                ptr *p_p = (ptr*)&BVIT(p, 0);
+                for (idx = 0; idx < p_len; idx++)
+                {
+                  { /* measure */
+                    ptr r_p = S_maybe_reference_to_object(p_p[idx]);
+                    if (!FIXMEDIATE(r_p))
+                      push_measure(tgc, r_p);
+                  }
+                }
+              }
+            }
+          }
+        }
+        else
+        {
+          uptr sz = size_bytevector((Sbytevector_length(p)));
+          {
+            uptr p_sz = sz;
+            measure_total += p_sz;
+          }
+        }
       }
     }
     else if ((iptr)tf == type_tlc)
@@ -4486,7 +4712,22 @@ static void measure(thread_gc *tgc, ptr p)
   {
     {
       ISPC p_at_spc = SPACE(p);
-      if (p_at_spc == space_ephemeron)
+      if (p_at_spc < space_weakpair)
+      {
+        uptr p_sz = size_pair;
+        measure_total += p_sz;
+        { /* measure */
+          ptr r_p = INITCAR(p);
+          if (!FIXMEDIATE(r_p))
+            push_measure(tgc, r_p);
+        }
+        { /* measure */
+          ptr r_p = INITCDR(p);
+          if (!FIXMEDIATE(r_p))
+            push_measure(tgc, r_p);
+        }
+      }
+      else if (p_at_spc == space_ephemeron)
       {
         uptr p_sz = size_ephemeron;
         measure_total += p_sz;
@@ -4504,18 +4745,7 @@ static void measure(thread_gc *tgc, ptr p)
       }
       else
       {
-        uptr p_sz = size_pair;
-        measure_total += p_sz;
-        { /* measure */
-          ptr r_p = INITCAR(p);
-          if (!FIXMEDIATE(r_p))
-            push_measure(tgc, r_p);
-        }
-        { /* measure */
-          ptr r_p = INITCDR(p);
-          if (!FIXMEDIATE(r_p))
-            push_measure(tgc, r_p);
-        }
+        S_error_abort("misplaced pair");
       }
     }
   }

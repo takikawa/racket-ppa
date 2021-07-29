@@ -263,11 +263,35 @@
                              named-clauses))]
       [else (set! noname-clauses (cons compiled noname-clauses))]))
 
-  #`(λ (lang)
-      (make-hash (list #,@named-clauses
-                       #,@(if (null? noname-clauses)
+  (define hash-stx
+    #`(make-hash (list #,@(if (null? noname-clauses)
                               (list)
-                              (list #`(cons #f (list #,@noname-clauses))))))))
+                              (list #`(cons #f (list #,@noname-clauses))))
+                       #,@named-clauses)))
+  (cond
+    [(identifier? orig)
+     (define jf-record (lookup-judgment-form-id orig))
+     #`(λ (lang)
+         (build-extended-jf-hash
+          (#,(judgment-form-mk-procs jf-record) lang)
+          #,hash-stx))]
+    [else
+     #`(λ (lang)
+         #,hash-stx)]))
+
+(define (build-extended-jf-hash orig-hash new-hash)
+  (define all-keys (remove-duplicates (append (hash-keys orig-hash) (hash-keys new-hash))))
+  (define result (make-hash))
+  (for ([key (in-list all-keys)]
+        #:when key)
+    (hash-set! result
+               key
+               (or (hash-ref new-hash key #f)
+                   (hash-ref orig-hash key))))
+  (define unnamed-rules (append (hash-ref new-hash #f '()) (hash-ref orig-hash #f '())))
+  (unless (null? unnamed-rules)
+    (hash-set! result #f unnamed-rules))
+  result)
 
 (define (check-jf-result-against-derivations only-check-contracts?
                                              derivation get-derivations
@@ -326,12 +350,24 @@
               sub-derivations
               (λ () #f))]
             [else
-             (define known-rules (sort (hash-keys modeless-jf-clause-table) string<?))
-             (error jf-name "unknown rule in derivation\n  rule: ~.s\n  known rules:~a"
-                    rule-name
-                    (apply string-append
-                           (for/list ([rule (in-list known-rules)])
-                             (format "\n   ~s" rule))))]))]
+             (define known-rules
+               (sort (filter values (hash-keys modeless-jf-clause-table))
+                     string<?))
+             (define error-intro
+               (if rule-name
+                   (format "unknown rule in derivation\n  rule: ~.s" rule-name)
+                   "used nameless rule in derivation, but there are no nameless rules in the judgment form"))
+             (define named-rules-str
+               (if (null? known-rules)
+                   ""
+                   (format "\n  named rules:~a"
+                           (apply string-append
+                                  (for/list ([rule (in-list known-rules)])
+                                    (format "\n   ~s" rule))))))
+             (error jf-name
+                    "~a~a"
+                    error-intro
+                    named-rules-str)]))]
        [else #f])]
     [_ #f]))
 

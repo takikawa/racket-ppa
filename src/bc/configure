@@ -3500,6 +3500,7 @@ WINDRES=windres
 DLLTOOL=dlltool
 
 PREFLAGS="$CPPFLAGS"
+COPY_NEW_CFLAGS_TO_CPPFLAGS=yes
 
 OWN_LIBFFI="ON"
 
@@ -4927,7 +4928,7 @@ CGC_X86_64=""
 case "$host_os" in
   solaris2*)
     STATICLINK="-Wl,-Bstatic" # after -ldl
-    LIBS="$LIBS -lsocket -lnsl -lintl"
+    LIBS="$LIBS -lsocket -lnsl -lintl -lrt"
     need_gcc_static_libgcc="yes"
     check_gcc_dash_e="yes"
     use_flag_pthread="no"
@@ -4967,7 +4968,7 @@ case "$host_os" in
     fi
     ;;
   linux*)
-    LIBS="$LIBS -ldl -lm -rdynamic"
+    LIBS="$LIBS -ldl -lm -lrt -rdynamic"
     DYN_CFLAGS="-fPIC"
     case "$host_cpu" in
       #Required for CentOS 4.6
@@ -6971,8 +6972,10 @@ fi
 if test "${enable_ubsan}" = "yes" ; then
    UBSAN="-fsanitize=undefined -fno-sanitize=alignment -fno-sanitize=float-divide-by-zero"
    CFLAGS="$CFLAGS $UBSAN"
-   CPPFLAGS="$CPPFLAGS $UBSAN"
-   PREFLAGS="$PREFLAGS $UBSAN"
+   if test "${COPY_NEW_CFLAGS_TO_CPPFLAGS}" = "yes" ; then
+     CPPFLAGS="$CPPFLAGS $UBSAN"
+     PREFLAGS="$PREFLAGS $UBSAN"
+   fi
    LDFLAGS="$LDFLAGS $UBSAN"
 fi
 

@@ -2,19 +2,37 @@
 
 ;; This module provides functions for parsing types written by the user
 
-(require (rename-in "../utils/utils.rkt" [infer infer-in])
-         (rep core-rep type-rep object-rep values-rep free-ids rep-utils)
-         (types abbrev utils prop-ops resolve
-                classes signatures
-                subtype path-type numeric-tower)
-         (only-in (infer-in infer) intersect)
-         (utils tc-utils prefab stxclass-util literal-syntax-class
-                identifier)
+(require (except-in "../utils/utils.rkt" infer)
+         "../rep/core-rep.rkt"
+         "../rep/type-rep.rkt"
+         "../rep/object-rep.rkt"
+         "../rep/values-rep.rkt"
+         "../rep/free-ids.rkt"
+         "../rep/rep-utils.rkt"
+         "../types/abbrev.rkt"
+         "../types/utils.rkt"
+         "../types/prop-ops.rkt"
+         "../types/resolve.rkt"
+         "../types/classes.rkt"
+         "../types/signatures.rkt"
+         "../types/subtype.rkt"
+         "../types/path-type.rkt"
+         "../types/numeric-tower.rkt"
+         (only-in "../infer/infer.rkt" intersect)
+         "../utils/tc-utils.rkt"
+         "../utils/prefab.rkt"
+         "../utils/stxclass-util.rkt"
+         "../utils/literal-syntax-class.rkt"
+         "../utils/identifier.rkt"
          syntax/stx (prefix-in c: (contract-req))
          syntax/parse racket/sequence
-         (env tvar-env type-alias-env mvar-env
-              lexical-env index-env row-constraint-env
-              signature-env)
+         "../env/tvar-env.rkt"
+         "../env/type-alias-env.rkt"
+         "../env/mvar-env.rkt"
+         "../env/lexical-env.rkt"
+         "../env/index-env.rkt"
+         "../env/row-constraint-env.rkt"
+         "../env/signature-env.rkt"
          racket/dict
          racket/list
          racket/promise
@@ -60,6 +78,10 @@
 ;; The typechecker uses this parameter to determine if parsing Self
 ;; is inside Struct-Property.
 (define current-in-struct-prop (make-parameter #f))
+
+;; This parameter is set to #t when we are paring potential existential type
+;; result for the range of a function type.
+(define parsing-existential-rng? (make-parameter #f))
 
 (define-syntax-rule (with-local-term-names bindings e ...)
   (parameterize ([current-local-term-ids
@@ -429,8 +451,7 @@
   (pattern (:*^ ~! n:exact-integer o:linear-expression)
            #:attr val (-lexp (list (syntax->datum #'n) (attribute o.val))))
   (pattern o:symbolic-object-w/o-lexp
-           #:attr val (attribute o.val))
-  )
+           #:attr val (attribute o.val)))
 
 
 (define-syntax-class symbolic-object-w/o-lexp
@@ -488,8 +509,7 @@
                             (not (subtype obj-ty -Int)))
            (format "terms in linear expressions must be integers, got ~a for ~a"
                    obj-ty obj)
-           #:attr val (attribute o.val))
-  )
+           #:attr val (attribute o.val)))
 
 ;; [Listof Object?] boolean? -> Object?
 ;; create (+ linear-exps ...) or (- linear-exps ...)
@@ -568,6 +588,14 @@
   #:attributes (type)
   (pattern i:Self^
            #:attr type -Self))
+
+(define-syntax-class existential-type-result
+  #:attributes (vars t prop-type)
+  (pattern (:Some^ (x:id ...) t)
+           #:attr prop-type #f
+           #:attr vars (syntax->list #'(x ...)))
+  (pattern (:Some^ (x:id ...) t :colon^ #:+ prop-type:expr)
+           #:attr vars (syntax->list #'(x ...))))
 
 (define-splicing-syntax-class sp-arg
   #:attributes (type pred?)
@@ -806,7 +834,7 @@
        (define names (map syntax-e (syntax->list #'(x ...))))
        (extend-tvars names
                      (make-Some names
-                                 (parse-type #'t.type)))]
+                                (parse-type #'t.type)))]
       [(:Opaque^ p?:id)
        (make-Opaque #'p?)]
       [(:Distinction^ name:id unique-id:id rep-ty:expr)
@@ -1039,6 +1067,20 @@
       (->* (parse-types #'(dom ...))
       (parse-values-type #'rng))]     |#
       ;; use expr to rule out keywords
+      [rng:existential-type-result #:fail-unless
+                                   parsing-existential-rng?
+                                   "extential type results are only allowed in the range of a function type"
+       (define syms (map syntax-e (attribute rng.vars)))
+       (extend-tvars syms
+                     (cond
+                       [(attribute rng.prop-type)
+                        (make-ExitentialResult syms
+                                               (parse-type (attribute rng.t))
+                                               (-PS (-is-type 0 (parse-type (attribute rng.prop-type)))
+                                                    -tt)
+                                               -empty-obj)]
+                       [else
+                        (parse-type (attribute rng.t))]))]
       [(~or (:->^ dom:non-keyword-ty ... kws:keyword-tys ... rng)
             (dom:non-keyword-ty ... kws:keyword-tys ... :->^ rng))
        (define doms (syntax->list #'(dom ...)))
@@ -1047,7 +1089,8 @@
                        (parse-type d))])
            (make-Fun
             (list (-Arrow doms
-                          (parse-values-type #'rng)
+                          (parameterize ([parsing-existential-rng? #t])
+                            (parse-values-type #'rng))
                           #:kws (map force (attribute kws.Keyword)))))))]
       ;; This case needs to be at the end because it uses cut points to give good error messages.
       [(~or (:->^ ~! dom:non-keyword-ty ... rng:expr

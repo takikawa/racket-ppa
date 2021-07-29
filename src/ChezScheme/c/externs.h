@@ -89,7 +89,7 @@ extern ptr S_vector PROTO((iptr n));
 extern ptr S_fxvector PROTO((iptr n));
 extern ptr S_flvector PROTO((iptr n));
 extern ptr S_bytevector PROTO((iptr n));
-extern ptr S_bytevector2 PROTO((ptr tc, iptr n, IBOOL immobile));
+extern ptr S_bytevector2 PROTO((ptr tc, iptr n, ISPC spc));
 extern ptr S_null_immutable_vector PROTO((void));
 extern ptr S_null_immutable_fxvector PROTO((void));
 extern ptr S_null_immutable_bytevector PROTO((void));
@@ -395,8 +395,8 @@ extern uptr S_maxmembytes PROTO((void));
 extern void S_resetmaxmembytes PROTO((void));
 extern void S_adjustmembytes PROTO((iptr amt));
 extern void S_move_to_chunk_list PROTO((chunkinfo *chunk, chunkinfo **pchunk_list));
-extern void S_thread_start_code_write PROTO((ptr tc, IGEN maxg, IBOOL current, void *hint));
-extern void S_thread_end_code_write PROTO((ptr tc, IGEN maxg, IBOOL current, void *hint));
+extern void S_thread_start_code_write PROTO((ptr tc, IGEN maxg, IBOOL current, void *hint, uptr hint_len));
+extern void S_thread_end_code_write PROTO((ptr tc, IGEN maxg, IBOOL current, void *hint, uptr hint_len));
 
 /* stats.c */
 extern void S_stats_init PROTO((void));

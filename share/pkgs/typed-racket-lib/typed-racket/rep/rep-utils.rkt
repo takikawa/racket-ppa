@@ -1,6 +1,7 @@
 #lang racket/base
 (require "../utils/utils.rkt"
-         (utils tc-utils identifier)
+         "../utils/tc-utils.rkt"
+         "../utils/identifier.rkt"
          
          racket/match
          (contract-req)
@@ -12,7 +13,7 @@
          racket/generic
          (only-in racket/unsafe/ops unsafe-struct-ref)
          (for-syntax
-          (utils tc-utils)
+          "../utils/tc-utils.rkt"
           racket/match
           racket/list
           (except-in syntax/parse id identifier keyword)
@@ -210,6 +211,24 @@
                       (begin0 state (set! state (add1 state)))))
             (λ () (set! finalized? #t) state))))
 
+(define-syntax (Rep-update stx)
+  (syntax-case stx ()
+    [(_ rep ins fld ... update-fn)
+     (with-syntax ([(new-val ...) (generate-temporaries #'(fld ...))]
+                   [(old-val ...) (generate-temporaries #'(fld ...))])
+       #'(begin (match-define (struct* rep ([fld old-val] ...)) ins)
+                (define-values (new-val ...) (update-fn old-val ...))
+                (struct-copy rep ins [fld new-val] ...)))]))
+
+(define-syntax (Rep-updator stx)
+  (syntax-case stx ()
+    [(_ rep updator-id)
+     #'(define-syntax (updator-id stx)
+         (syntax-case stx ()
+           [(_ arg (... ...))
+            #'(Rep-update rep arg (... ...))]))]))
+
+
 (begin-for-syntax
   ;; defines a "rep transformer"
   ;; These are functions defined to fold over Reps (e.g. Rep-fmap, Rep-for-each).
@@ -272,7 +291,7 @@
              #:with def (rep-transform #'self #'f struct-fields #'body)))
   ;; variant name parsing
   (define-syntax-class var-name
-    #:attributes (name constructor raw-constructor match-expander predicate)
+    #:attributes (name constructor raw-constructor match-expander predicate updator)
     (pattern name:id
              #:with constructor (format-id #'name "make-~a" (syntax-e #'name))
              ;; hidden constructor for use inside custom constructor defs
@@ -280,7 +299,9 @@
              #:with match-expander
              (format-id #'name "~a:" (syntax-e #'name))
              #:with predicate
-             (format-id #'name "~a?" (syntax-e #'name))))
+             (format-id #'name "~a?" (syntax-e #'name))
+             #:with updator
+             (format-id #'var.name "~a-update" (syntax-e #'name))))
   ;; structure accessor parsing
   (define-syntax-class (fld-id struct-name)
     #:attributes (name accessors)
@@ -485,6 +506,7 @@
                 (let ()
                   struct-def
                   (var.constructor)))
+              (Rep-updator var.name var.updator)
               (declare-predefined-type! singleton)
               (define (var.predicate x) (eq? x singleton))
               (define-match-expander var.match-expander
@@ -492,7 +514,7 @@
                   (syntax-parse s
                     [(_) (syntax/loc s (? var.predicate))])))
               (provide singleton var.predicate var.match-expander
-                       uid-id)))]
+                       uid-id var.updator)))]
          [else
           (syntax/loc stx
             (begin
@@ -500,5 +522,8 @@
               struct-def
               constructor-def
               mexpdr-def
+              (Rep-updator var.name var.updator)
               provides ...
-              (provide uid-id)))]))]))
+              (provide uid-id var.updator)))]))]))
+
+

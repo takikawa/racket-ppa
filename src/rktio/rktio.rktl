@@ -15,6 +15,7 @@
 (define-constant RKTIO_OPEN_NOT_DIR (<< 1 12))
 (define-constant RKTIO_OPEN_INIT (<< 1 13))
 (define-constant RKTIO_OPEN_OWN (<< 1 14))
+(define-constant RKTIO_DEFAULT_PERM_BITS 438)
 (define-constant RKTIO_STDIN 0)
 (define-constant RKTIO_STDOUT 1)
 (define-constant RKTIO_STDERR 2)
@@ -278,6 +279,15 @@
  (ref rktio_fd_t)
  rktio_open
  (((ref rktio_t) rktio) (rktio_const_string_t src) (int modes)))
+(define-function/errno
+ NULL
+ ()
+ (ref rktio_fd_t)
+ rktio_open_with_create_permissions
+ (((ref rktio_t) rktio)
+  (rktio_const_string_t src)
+  (int modes)
+  (int perm_bits)))
 (define-function/errno
  #f
  ()
@@ -1212,6 +1222,11 @@
 (define-function () double rktio_get_inexact_milliseconds ())
 (define-function
  ()
+ double
+ rktio_get_inexact_monotonic_milliseconds
+ (((ref rktio_t) rktio)))
+(define-function
+ ()
  uintptr_t
  rktio_get_process_milliseconds
  (((ref rktio_t) rktio)))
@@ -1236,7 +1251,7 @@
   (int get_gmt)))
 (define-function/errno
  #f
- ()
+ (msg-queue)
  rktio_ok_t
  rktio_shell_execute
  (((ref rktio_t) rktio)

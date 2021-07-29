@@ -477,6 +477,7 @@
 
           time-apply
           current-inexact-milliseconds
+          current-inexact-monotonic-milliseconds
           current-milliseconds
           current-gc-milliseconds
           current-seconds
@@ -652,6 +653,7 @@
           poll-async-callbacks            ; not exported to Racket
           set-make-async-callback-poll-wakeup! ; not exported to Racket
           set-foreign-eval!               ; not exported to Racket
+          call-enabling-ffi-callbacks     ; not exported to Racket
 
           ptr-ref/int8 ptr-set!/int8      ; not exported to Racket
           ptr-ref/uint8 ptr-set!/uint8    ; not exported to Racket
@@ -743,6 +745,7 @@
           continuation-current-primitive
           call-as-asynchronous-callback
           post-as-asynchronous-callback
+          ensure-virtual-registers
 
           ;; compile-time use in "thread.sls"
           current-atomic-virtual-register
@@ -769,7 +772,6 @@
   (define none2 '#{none kwcju864gpycc2h151s9atbmo-2}) ; never put this in an emphemeron
 
   (include "rumble/virtual-register.ss")
-  (include "rumble/layout.ss")
   (include "rumble/begin0.ss")
   (include "rumble/syntax-rule.ss")
   (include "rumble/value.ss")
