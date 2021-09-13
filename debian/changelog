@@ -1,8 +1,10 @@
 racket (8.2+dfsg1-2) unstable; urgency=medium
 
   * Re-upload to unstable.
+  * Bug fix: "build with -O2 to avoid misbuild with CFLAGS=-O3", thanks to
+    Steve Langasek (Closes: #935930).
 
- -- David Bremner <bremner@debian.org>  Mon, 13 Sep 2021 19:24:29 -0300
+ -- David Bremner <bremner@debian.org>  Mon, 13 Sep 2021 20:48:34 -0300
 
 racket (8.2+dfsg1-1) experimental; urgency=medium
 

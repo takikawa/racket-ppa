@@ -29,6 +29,9 @@ ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
     DEB_CONFIGURE_EXTRA_FLAGS += --enable-noopt
 endif
 
+DEB_CFLAGS_MAINT_APPEND := -O2
+export DEB_CFLAGS_MAINT_APPEND
+
 # Support for generating ".orig.tar.gz" from git
 
 SOURCEPKG=$(shell dpkg-parsechangelog | sed  -n 's/^Source: \(.*\)/\1/p')
