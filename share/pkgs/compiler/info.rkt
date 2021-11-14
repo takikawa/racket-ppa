@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("compiler-lib"))) (define implies (quote ("compiler-lib"))) (define pkg-desc "Racket compilation tools, such as `raco exe'") (define pkg-authors (quote (mflatt)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("compiler-lib"))) (define implies (quote ("compiler-lib"))) (define pkg-desc "Racket compilation tools, such as `raco exe'") (define pkg-authors (quote (mflatt))) (define license (quote (Apache-2.0 OR MIT)))))

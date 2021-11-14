@@ -157,7 +157,7 @@ and how they can be used to implement contracts.
 
 @defproc[(flat-named-contract [name any/c]
                               [flat-contract flat-contract?]
-                              [generator (or/c #f (-> contract (-> int? any))) #f])
+                              [generator (or/c #f (-> exact-nonnegative-integer? (-> any/c))) #f])
          flat-contract?]{
 Produces a @tech{flat contract} like @racket[flat-contract], but with the name @racket[name].
 
@@ -2093,8 +2093,7 @@ accessors, and mutators are protected by contracts.  For the definitions of
 
 The @racket[struct/contract] form only allows a subset of the
 @racket[struct-option] keywords: @racket[#:mutable], @racket[#:transparent],
-@racket[#:auto-value], @racket[#:omit-define-syntaxes], @racket[#:property] and
-@racket[#:omit-define-values].
+@racket[#:auto-value], @racket[#:omit-define-syntaxes], and @racket[#:property].
 
 @examples[#:eval (contract-eval) #:once
 (struct/contract fruit ([seeds number?]))
@@ -2117,11 +2116,12 @@ Works like @racket[struct/contract], except that the syntax for supplying a
 has a @racketidfont{make-} prefix on @racket[struct-id] is implicitly
 supplied.  For the definitions of
 @racket[field] and @racket[struct-option], see @racket[define-struct].
+Like @racket[struct] versus @racket[define-struct],
+@racket[struct/contract] is normally preferred to @racket[define-struct/contract].
 
 The @racket[define-struct/contract] form only allows a subset of the
 @racket[struct-option] keywords: @racket[#:mutable], @racket[#:transparent],
-@racket[#:auto-value], @racket[#:omit-define-syntaxes], @racket[#:property] and
-@racket[#:omit-define-values].
+@racket[#:auto-value], @racket[#:omit-define-syntaxes], and @racket[#:property].
 
 @examples[#:eval (contract-eval) #:once
 (define-struct/contract fish ([color number?]))
@@ -2953,7 +2953,7 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
            (->i ([c contract?])
                 [generator
                  (c)
-                 (-> (and/c positive? real?)
+                 (-> exact-nonnegative-integer?
                      (or/c (-> (or/c contract-random-generate-fail? c))
                            #f))])
            (λ (c) (λ (fuel) #f))]
@@ -3003,7 +3003,7 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
            (->i ([c contract?])
                 [generator
                  (c)
-                 (-> (and/c positive? real?)
+                 (-> exact-nonnegative-integer?
                      (or/c (-> (or/c contract-random-generate-fail? c))
                            #f))])
            (λ (c) (λ (fuel) #f))]
@@ -3012,7 +3012,7 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
            (->i ([c contract?])
                 [result
                  (c)
-                 (-> (and/c positive? real?)
+                 (-> exact-nonnegative-integer?
                      (values
                       (-> c void?)
                       (listof contract?)))])
@@ -3063,7 +3063,7 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
            (->i ([c contract?])
                 [generator
                  (c)
-                 (-> (and/c positive? real?)
+                 (-> exact-nonnegative-integer?
                      (or/c (-> (or/c contract-random-generate-fail? c))
                            #f))])
            (λ (c) (λ (fuel) #f))]
@@ -3072,7 +3072,7 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
            (->i ([c contract?])
                 [result
                  (c)
-                 (-> (and/c positive? real?)
+                 (-> exact-nonnegative-integer?
                      (values
                       (-> c void?)
                       (listof contract?)))])

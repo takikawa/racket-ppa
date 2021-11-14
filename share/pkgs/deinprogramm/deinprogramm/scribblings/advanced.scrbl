@@ -33,7 +33,7 @@ This is documentation for the language level @italic{Schreibe Dein Programm
 )
 (
   @#,racket[(list-of sig)]
-  @#,racket[(nonempty-list-of sig)]
+  @#,racket[(cons-list-of sig)]
 )
 (
  @#,racket[(make-pair pattern pattern)]

@@ -29,6 +29,8 @@ Will not work with the definitions text surrogate interposition that
   (or/c 'drracket:default-filters
         'drracket:default-extension
         'drracket:indentation
+        'drracket:range-indentation
+        'drracket:grouping-position
         'drracket:keystrokes
         'drracket:show-big-defs/ints-labels
         'drracket:submit-predicate
@@ -38,7 +40,8 @@ Will not work with the definitions text surrogate interposition that
         'drscheme:opt-out-toolbar-buttons
         'drracket:opt-in-toolbar-buttons
         'color-lexer
-        'definitions-text-surrogate))
+        'definitions-text-surrogate
+        'drracket:paren-matches))
 
 (provide
  (contract-out
@@ -207,6 +210,20 @@ Will not work with the definitions text surrogate interposition that
              an-irl
              (λ () #f)
              (λ () (val txt pos)))))]
+    [(drracket:range-indentation)
+     (and val
+          (λ (txt start-pos end-pos)
+            (call-in-irl-context/abort
+             an-irl
+             (λ () #f)
+             (λ () (val txt start-pos end-pos)))))]
+    [(drracket:grouping-position)
+     (and val
+          (λ (text start-position limit-position direction)
+            (call-in-irl-context/abort
+             an-irl
+             (λ () #t)
+             (λ () (val text start-position limit-position direction)))))]
     [(drracket:keystrokes)
      (for/list ([pr (in-list val)])
        (define key (list-ref pr 0))
@@ -216,6 +233,8 @@ Will not work with the definitions text surrogate interposition that
                     an-irl
                     void
                     (λ () (proc txt evt))))))]
+    [(drracket:paren-matches)
+     (or val racket:default-paren-matches)]
     [else
      val]))
   

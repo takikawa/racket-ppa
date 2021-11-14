@@ -818,6 +818,7 @@ please adhere to these guidelines:
   (file-dne "That file does not exist.")
   (empty-filename "The filename must have some letters in it.")
   (that-is-dir-name "That is a directory name.")
+  (use-platform-specific-file-dialogs "Use platform-specific file dialogs") ;; a preferences option
 
   ;;; raw menu names -- these must match the
   ;;; versions below, once the &s have been stripped.

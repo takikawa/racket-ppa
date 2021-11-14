@@ -29,7 +29,8 @@
          pkg/gui
          (for-syntax images/icons/misc images/icons/style images/icons/control images/logos)
          (for-syntax racket/base)
-         (submod "frame.rkt" install-pkg))
+         (submod "frame.rkt" install-pkg)
+         (only-in simple-tree-text-markup/port srclocs-special<%>))
 
 (define orig (current-output-port))
 (define (oprintf . args) (apply fprintf orig args))
@@ -214,17 +215,22 @@
   (define (make-note% filename bitmap)
     (and (send bitmap ok?)
          (letrec ([note%
-                   (class clickable-image-snip%
+                   (class* clickable-image-snip% (srclocs-special<%>)
                      (inherit get-callback)
                      (define/public (get-image-name) filename)
                      (define stack1 #f)
                      (define stack2 #f)
                      (define/public (set-stacks s1 s2) (set! stack1 s1) (set! stack2 s2))
                      (define/public (get-stacks) (values stack1 stack2))
+                     (define srclocs #f)
+                     (define/public (set-srclocs s)
+                       (set! srclocs s))
+                     (define/public (get-srclocs) srclocs)
                      (define/override (copy) 
                        (let ([n (new note%)])
                          (send n set-callback (get-callback))
                          (send n set-stacks stack1 stack2)
+                         (send n set-srclocs srclocs)
                          n))
                      (super-make-object bitmap))])
            note%)))
@@ -559,6 +565,7 @@
         (when file-note%
           (when (port-writes-special? (current-error-port))
             (define note (new file-note%))
+            (send note set-srclocs srcs-to-display)
             (send note set-callback 
                   (λ (snp) (open-and-highlight-in-file srcs-to-display a-viewable-stack)))
             (write-special note (current-error-port))
@@ -630,20 +637,31 @@
           [send-out
            (λ (msg f) 
              (if (port-writes-special? (current-error-port))
-                 (let ([snp (make-object string-snip% msg)])
-                   (f snp)
-                   (write-special snp (current-error-port)))
+                 (let loop ([msg msg])
+                   (cond
+                     [(equal? msg "") (void)]
+                     [(regexp-match-positions #rx"\n" msg)
+                      => (lambda (m)
+                           (loop (substring msg 0 (caar m)))
+                           (display "\n  " (current-error-port))
+                           (loop (substring msg (cdar m))))]
+                     [else
+                      (define snp (make-object string-snip% msg))
+                      (f snp)
+                      (write-special snp (current-error-port))]))
                  (display msg (current-error-port))))])
       (send error-text-style-delta set-delta-foreground (make-object color% 200 0 0))
-      (define (show-one expr)
+      (define (show-one str)
         (display " " (current-error-port))
-        (send-out (format "~s" (syntax->datum expr))
+        (send-out str
                   (λ (snp)
                     (send snp set-style
                           (send (editor:get-standard-style-list) find-or-create-style
                                 (send (editor:get-standard-style-list) find-named-style "Standard")
                                 error-text-style-delta)))))
       (define exprs (exn:fail:syntax-exprs exn))
+      (define strs (for/list ([expr (in-list exprs)])
+                     ((error-syntax->string-handler) expr #f)))
       (define (show-in)
         (send-out " in:"
                   (λ (snp)
@@ -651,16 +669,17 @@
                           (send (editor:get-standard-style-list) find-named-style
                                 (editor:get-default-color-style-name))))))
       (cond
-        [(null? exprs) (void)]
-        [(null? (cdr exprs))
+        [(null? strs) (void)]
+        [(and (null? (cdr strs))
+              (not (regexp-match? #rx"\n" (car strs))))
          (show-in)
-         (show-one (car exprs))]
+         (show-one (car strs))]
         [else
          (show-in)
-         (for-each (λ (expr)
+         (for-each (λ (str)
                      (display "\n " (current-error-port))
-                     (show-one expr))
-                   exprs)])))
+                     (show-one str))
+                   strs)])))
   
   
   ;; insert/clickback : (instanceof text%) (union string (instanceof snip%)) (-> void)

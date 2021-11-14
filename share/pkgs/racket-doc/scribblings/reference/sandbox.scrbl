@@ -155,7 +155,8 @@ constrains @racket[require] references expanded in the module when the
 precisely, it constrains the module paths that can be resolved when a
 syntax object is provided to the @tech{module name resolver}, which
 will include @racket[require] forms that are created by macro
-expansion.
+expansion. A relative-submodule path using @racket[submod] followed by
+either @racket["."] or @racket[".."] is always allowed.
 
 The following examples illustrate the difference between an evaluator
 that puts the program in a module and one that merely initializes a
@@ -260,39 +261,27 @@ An error will be signaled in such cases.
 If the value of @racket[sandbox-propagate-exceptions] is true (the
 default) when the sandbox is created, then exceptions (both syntax and
 run-time) are propagated as usual to the caller of the evaluation
-function (i.e., catch them with @racket[with-handlers]).  If the value
+function (i.e., catch them with @racket[with-handlers]). See below
+for a caveat about using raised exceptions directly. If the value
 of @racket[sandbox-propagate-exceptions] is @racket[#f] when the
 sandbox is created, then uncaught exceptions in a sandbox evaluation
 cause the error to be printed to the sandbox's error port, and the
 caller of the evaluation receives @|void-const|.
 
-Finally, the fact that a sandboxed evaluator accept syntax objects
-makes it usable as the value for @racket[current-eval], which means
-that you can easily start a sandboxed read-eval-print-loop:
+Take care when using a value returned from a sandbox or raised as an
+exception by a sandbox. The value might by an impersonator, or it
+might be a structure whose structure type redirects equality
+comparisons or printing operations. To safely handle an unknown value
+produced by a sandbox, manipulate it within the sandbox, possibly
+using @racket[call-in-sandbox-context].
 
-@racketblock[
-(define e (make-evaluator 'racket/base))
-(parameterize ([current-eval e])
-  (read-eval-print-loop))
-]
-
-Note that in this code only the REPL interactions will be printed to
-the current output ports; using I/O operations inside the REPL will
-still use the usual sandbox parameters (defaulting to no I/O).  In
-addition, the code works only from an existing toplevel REPL ---
-specifically, @racket[read-eval-print-loop] reads a syntax value and
-gives it the lexical context of the current namespace.  Here is a
-variation that also allows I/O over the current input and output
-ports, and works when used from a module (by using a new namespace):
-
-@racketblock[
-(parameterize ([sandbox-input        current-input-port]
-               [sandbox-output       current-output-port]
-               [sandbox-error-output current-error-port]
-               [current-namespace (make-empty-namespace)])
-  (parameterize ([current-eval (make-evaluator 'racket/base)])
-    (read-eval-print-loop)))
-]
+An evaluator can be used only by one thread at a time, and detected
+concurrent use triggers an exception. Beware of using an evaluator in
+a non-main thread, because the default value of
+@racket[sandbox-make-plumber] registers a callback in the current
+plumber to flush the evaluator's plumber, and that means a flush of
+the current plumber (such as when the Racket process is about to exit)
+implies a use of the evaluator.
 
 @history[#:changed "1.2" @elem{Added the @racket[#:readers] and
          @racket[#:allow-syntactic-require] arguments.}]}
@@ -304,8 +293,7 @@ ports, and works when used from a module (by using a new namespace):
 
 A predicate and accessor for exceptions that are raised when a sandbox
 is terminated.  Once a sandbox raises such an exception, it will
-continue to raise it on further evaluation attempts.
-}
+continue to raise it on further evaluation attempts.}
 
 @; ----------------------------------------------------------------------
 
@@ -906,7 +894,7 @@ propagates the break to the evaluator's context.}
 
 Retrieves the @racket[evaluator]'s toplevel custodian.  This returns a
 value that is different from @racket[(evaluator '(current-custodian))]
-or @racket[call-in-sandbox-context evaluator current-custodian] --- each
+or @racket[(call-in-sandbox-context evaluator current-custodian)] --- each
 sandbox interaction is wrapped in its own custodian, which is what these
 would return.
 
@@ -1091,6 +1079,13 @@ the thunk is returned as usual (a value, multiple values, or an
 exception).  Each of the two limits can be @racket[#f] to indicate the
 absence of a limit. See also @racket[custodian-limit-memory] for
 information on memory limits.
+
+To enforce limits, @racket[thunk] is run in a new thread. As usual,
+the new thread starts with the same parameter values as the one that
+calls @racket[call-with-limits]. @emph{Not} as usual, parameter values
+from the thread used to run @racket[thunk] are copied back to the
+thread that called @racket[call-with-limits] when @racket[thunk]
+completes.
 
 Sandboxed evaluators use @racket[call-with-limits], according to the
 @racket[sandbox-eval-limits] setting and uses of
