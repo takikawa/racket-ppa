@@ -696,6 +696,11 @@
                  (cl->* ((-lst a) Univ . -> . (-opt -Index))
                         ((-lst a) b (-> a b Univ)
                            . -> . (-opt -Index))))]
+[index-where (-poly (a)
+                    ((-lst a)
+                     (-> a Univ)
+                     . -> .
+                     (-opt -Index)))]
 
 [list? (make-pred-ty (-lst Univ))]
 [list (-poly (a) (->* '() a (-lst a)))]
@@ -1210,7 +1215,7 @@
                        (make-ListDots a 'a)
                        (-values (list (-lst* b) -Nat -Nat -Nat)))))]
 
-;; Section 4.17.3 (racket/function)
+;; Section 4.18.3 (racket/function)
 [identity (-poly (a) (->acc (list a) a null))]
 [const (-poly (a) (-> a (->* '() Univ a)))]
 [negate (-polydots (a b c d)

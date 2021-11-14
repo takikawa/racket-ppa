@@ -801,7 +801,16 @@ Returns a list of all real solutions to the equation @math-style{a x^2 + b x +c 
                       (quadratic-solutions 1 0 -1)
                       (quadratic-solutions 1 2 1)
                       (quadratic-solutions 1 0 1)]  
+The implementation of @racket[quadratic-solutions] handles
+cancellation and overflow intelligently:
+  @interaction[#:eval untyped-eval
+                      (quadratic-solutions 1e200 2e200 1e200)
+                      (quadratic-solutions 1e-200 -2e-200 1e-200)]  
+For exact inputs, if the output can be exactly represented, it will be:
+  @interaction[#:eval untyped-eval
+                      (quadratic-solutions -1 2/3 1/3)]  
 }
+
 
 @defproc[(quadratic-integer-solutions [a Real] [b Real] [c Real]) (Listof Integer)]{
 Returns a list of all integer solutions to the equation @math-style{a x^2 + b x +c = 0}.

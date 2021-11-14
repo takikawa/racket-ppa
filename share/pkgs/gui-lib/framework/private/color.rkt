@@ -374,19 +374,13 @@ added get-regions
                                     (dont-stop-val new-lexer-mode/cont)
                                     new-lexer-mode/cont))
          (define next-ok-to-stop? (not (dont-stop? new-lexer-mode/cont)))
+         (check-colorer-results-match-port-before-and-afters
+          type pos-before new-token-start new-token-end pos-after)
          (cond
            [(eq? 'eof type) 
             (set-lexer-state-up-to-date?! ls #t)
             (re-tokenize-move-to-next-ls start-time next-ok-to-stop?)]
            [else
-            (unless (<= pos-before new-token-start pos-after)
-              (error 'color:text<%>
-                     "expected the token start to be between ~s and ~s, got ~s"
-                     pos-before pos-after new-token-start))
-            (unless (<= pos-before new-token-end pos-after)
-              (error 'color:text<%>
-                     "expected the token end to be between ~s and ~s, got ~s"
-                     pos-before pos-after new-token-end))
             (let ((len (- new-token-end new-token-start)))
               (set-lexer-state-current-pos! ls (+ len (lexer-state-current-pos ls)))
               (set-lexer-state-current-lexer-mode! ls new-lexer-mode)
@@ -1361,7 +1355,7 @@ added get-regions
 
 (define -text% (text-mixin text:keymap%))
 
-(define -text-mode<%> (interface () set-get-token))
+(define -text-mode<%> (interface () set-get-token set-matches))
 
 (define text-mode-mixin
   (mixin (mode:surrogate-text<%>) (-text-mode<%>)
@@ -1381,6 +1375,9 @@ added get-regions
 
     (define/public (set-get-token _get-token)
       (set! get-token _get-token))
+
+    (define/public (set-matches _matches)
+      (set! matches _matches))
     
     (super-new)))
 

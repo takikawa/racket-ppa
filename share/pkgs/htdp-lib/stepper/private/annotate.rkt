@@ -1352,7 +1352,7 @@
 (define (stepper-recertify new-stx old-stx)
   (syntax-rearm new-stx old-stx #t))
 
-;; does this stx have the 'stepper-skip-completely property?
+;; does this stx have the 'stepper-skip-completely or 'stepper-black-box-expr property?
 (define (to-be-skipped? stx)
   (stepper-syntax-property stx 'stepper-skip-completely))
 

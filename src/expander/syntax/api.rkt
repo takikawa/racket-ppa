@@ -1,7 +1,9 @@
 #lang racket/base
 (require "../common/phase.rkt"
+         "../common/phase+space.rkt"
          "../common/module-path.rkt"
          (rename-in "syntax.rkt"
+                    [syntax-srcloc raw:syntax-srcloc]
                     [syntax->datum raw:syntax->datum]
                     [datum->syntax raw:datum->syntax])
          "property.rkt"
@@ -35,6 +37,7 @@
 
 (provide syntax?
          syntax-e
+         syntax-srcloc
          syntax-property
          syntax-property-remove
          syntax-property-preserved?
@@ -68,6 +71,10 @@
   (check who syntax? s)
   (raw:syntax-e s))
 
+(define/who (syntax-srcloc s)
+  (check who syntax? s)
+  (raw:syntax-srcloc s))
+
 (define/who (syntax->datum s)
   (check who syntax? s)
   (raw:syntax->datum s))
@@ -82,9 +89,11 @@
     (raise-argument-error who "(or/c #f syntax?)" stx-c))
   (unless (or (not stx-l)
               (syntax? stx-l)
+              (srcloc? stx-l)
               (encoded-srcloc? stx-l))
     (raise-argument-error who
                           (string-append "(or/c #f syntax?\n"
+                                         "         srcloc?\n"
                                          "         (list/c any/c\n"
                                          "                 (or/c exact-positive-integer? #f)\n"
                                          "                 (or/c exact-nonnegative-integer? #f)\n"
@@ -107,9 +116,9 @@
                                        [sym as-sym]
                                        [phase as-phase]
                                        [nominal-mpi mpi]
-                                       [nominal-phase phase]
+                                       [nominal-phase+space phase]
                                        [nominal-sym sym]
-                                       [nominal-require-phase 0]
+                                       [nominal-require-phase+space-shift 0]
                                        [insp #f])
   (check who syntax-binding-set? bs)
   (check who symbol? as-sym)
@@ -118,14 +127,14 @@
   (check who symbol? sym)
   (check who phase? #:contract phase?-string phase)
   (check who module-path-index? nominal-mpi)
-  (check who phase? #:contract phase?-string nominal-phase)
+  (check who phase+space? #:contract phase+space?-string nominal-phase+space)
   (check who symbol? nominal-sym)
-  (check who phase? #:contract phase?-string nominal-require-phase)
+  (check who phase+space-shift? #:contract phase+space-shift?-string nominal-require-phase+space-shift)
   (check who inspector? #:or-false insp)
   (raw:syntax-binding-set-extend bs as-sym as-phase mpi
                                  sym phase
-                                 nominal-mpi nominal-phase nominal-sym
-                                 nominal-require-phase
+                                 nominal-mpi (intern-phase+space nominal-phase+space) nominal-sym
+                                 (intern-phase+space-shift nominal-require-phase+space-shift)
                                  insp))
 
 (define/who (syntax-binding-set->syntax bs datum)

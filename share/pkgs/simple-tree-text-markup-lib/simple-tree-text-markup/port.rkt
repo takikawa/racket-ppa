@@ -1,16 +1,19 @@
 #lang racket/base
 (require racket/contract
-         (only-in simple-tree-text-markup/data markup?))
+         (only-in simple-tree-text-markup/data markup?)
+         (only-in racket/class interface interface? ->m))
 (provide
  (contract-out
   (make-markup-output-port/unsafe ((any/c . -> . markup?) . -> . (values output-port? (-> markup?))))
-  (make-markup-output-port ((any/c . -> . markup?) . -> . (values output-port? (-> markup?))))))
+  (make-markup-output-port ((any/c . -> . markup?) . -> . (values output-port? (-> markup?))))
+  (srclocs-special<%> interface?)))
 
 (require simple-tree-text-markup/construct
          (only-in racket/list dropf)
          (only-in racket/string string-split))
 
-(define (markup-accumulator special->markup)
+(define (markup-accumulator special->markup
+                            )
   (let ((horizontals '())
         (verticals '()))
     (define (add-to-horizontals! fragment)
@@ -88,3 +91,6 @@
      (lambda ()
        (call-with-semaphore lock get-markup)))))
 
+(define srclocs-special<%>
+  (interface ()
+    (get-srclocs (->m (or/c #f (listof srcloc?))))))

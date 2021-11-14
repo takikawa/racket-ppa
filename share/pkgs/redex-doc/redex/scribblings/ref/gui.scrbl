@@ -151,7 +151,12 @@ help give finer-grained control over the layout, so the
 before it is instantiated. Also note that all of the snips
 inserted into the editor by this library have a
 @tt{get-term-node} method which returns the snip's
-@racket[term-node].
+@racket[term-node?].
+
+ The @onscreen{Fix Layout} button calls out to @tt{dot} (a
+ program that's a part of @tt{graphviz}) and uses its results
+ to lay out the graph. While in the fixed-layout mode, the edges
+ are now drawn. Click the button again to restore the edges.
 
 For a more serious example of @racket[traces], please see @secref["tutorial"],
 but for a silly one that demonstrates how the @racket[pp] argument
@@ -256,7 +261,8 @@ just before the PostScript is created with the graph pasteboard.
                   [t any/c] 
                   [pp (or/c (any -> string)
                             (any output-port number (is-a?/c text%) -> void))
-                      default-pretty-printer])
+                      default-pretty-printer]
+                  [#:show-font-size-control? show-font-size-control? any/c #f])
           void?]{
 
 This function opens a stepper window for exploring the
@@ -272,17 +278,27 @@ highlighting shown in the stepper window can be wrong if
 @racket[default-pretty-printer] does not print sufficiently similarly
 to how @racket[pretty-print] prints (when adjusted by
 @racket[pretty-print-parameters]'s behavior, of course).
+
+If @racket[show-font-size-control?] is a true value, then a slider with a
+font size choice is shown in the window.
+
+@history[#:changed "1.1" @list{Added the @racket[show-font-size-control?] argument.}]
+
 }
 
 @defproc[(stepper/seed [reductions (or/c reduction-relation? IO-judgment-form?)]
                        [seed (cons/c any/c (listof any/c))]
                        [pp (or/c (any -> string)
                                  (any output-port number (is-a?/c text%) -> void))
-                           default-pretty-printer])
+                           default-pretty-printer]
+                       [#:show-font-size-control? show-font-size-control? any/c #f])
          void?]{
 
 Like @racket[stepper], this function opens a stepper window, but it
 seeds it with the reduction-sequence supplied in @racket[seed].
+
+@history[#:changed "1.1" @list{Added the @racket[show-font-size-control?] argument.}]
+
 }
 
 @defproc[(show-derivations [derivations (cons/c derivation? (listof derivation?))]

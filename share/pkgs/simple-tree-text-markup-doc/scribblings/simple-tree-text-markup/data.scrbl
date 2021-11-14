@@ -68,10 +68,10 @@ The format is not exactly specified, but a graphical renderer should accept
 If rendering of @racket[data] is not possible, @racket[alt-markup] can be substituted.
 }
 
-@defstruct[record-dc-datum
-	   ((datum any/c)
-            (width natural-number/c)
-            (height natural-number/c))]{
+@defstruct*[record-dc-datum
+	    ((datum any/c)
+             (width natural-number/c)
+             (height natural-number/c))]{
 This represents an image, containing the result the
 @racket[get-recorded-datum] from @racket[record-dc%],
 as well as the width and height of that image.}
@@ -102,3 +102,47 @@ back.
 
 If @racket[fraction-view] is @racket[#f], this option comes from some
 unspecified user preference.}
+
+@defproc[(markup-folder [combine procedure?] [identity any/c] [extractors (listof pair?)]) (markup? . -> . any/c)]{
+This creates a procedure that folds over a markup tree using a monoid:
+That procedure maps every node of the markup tree to an element of the monoid, and 
+returns the result of combining those values.
+
+The monoid itself is defined by @racket[combine] (its binary operation)
+and @racket[identity] (its identity / neutral element).
+
+The @racket[extractors] list consists of pairs: Each pair
+consists of a predicate on markup nodes (usually @racket[string?], @racket[empty-markup?]
+etc.) and a procedure to map a node, for which the predicate returns
+a true value, to an element of the monoid.
+
+The following example extracts a list of source locations from a markup tree:
+
+@racketblock[
+(define markup-srclocs
+  (markup-folder append '()
+		 `((,srcloc-markup? . ,(lambda (markup)
+					 (list (srcloc-markup-srcloc markup)))))))
+]
+}
+
+@defproc[(transform-markup [mappers (listof pair?)]
+                           [markup markup?])
+	 markup?]{
+This procedure transforms markup by replacing nodes. The @racket[mappers] argument
+is a list of pairs.  Each pair consists of a predicate on markup nodes (usually
+@racket[string?], @racket[empty-markup?] etc.) and a procedure that accepts
+as argument the struct components of the corresponding node, where
+the markup components have been recursively passed through @racket[transform-markup].
+The node is replaced by the return value of the procedure.
+
+The following example transforms each piece of image data in a markup tree:
+
+@racketblock[
+(define (markup-transform-image-data transform-image-data markup)
+  (transform-markup
+   `((,image-markup? . ,(lambda (data alt-markup)
+                          (image-markup (transform-image-data data) alt-markup))))
+   markup))
+]
+}

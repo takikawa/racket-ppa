@@ -5,14 +5,27 @@
 
 @defmodule[mrlib/syntax-browser]
 
-@defproc[(render-syntax/snip [stx syntax?]) (is-a?/c snip%)]{
+@defproc[(render-syntax/snip [stx syntax?]
+                             [#:summary-width summary-width (or/c #f 0 (integer-in 3 #f) +inf.0) 32])
+         (is-a?/c snip%)]{
  Constructs a @racket[snip%] object that displays information
  about @racket[stx].
+
+ The @racket[summary-width] parameter controls the width (in
+ characters) of the syntax object that is shown before the
+ triangle is turned down. If it is @racket[#f], the value of
+ the @racket[print-syntax-width] parameter is used.
+
+ @history[#:changed "1.59" @list{Added @racket[summary-width] argument and changed default width to 32.}]
 }
 
-@defproc[(render-syntax/window [stx syntax?]) void?]{ Uses
- @racket[render-syntax/snip]'s result, together with a frame
+@defproc[(render-syntax/window [stx syntax?]
+                               [#:summary-width summary-width (or/c #f 0 (integer-in 3 #f) +inf.0) 32])
+         void?]{
+ Uses @racket[render-syntax/snip]'s result, together with a frame
  and editor-canvas to show @racket[stx].
+
+ @history[#:changed "1.59" @list{Added @racket[summary-width] argument and changed default width to 32.}]
 }
 
 @defthing[snip-class (is-a?/c snip-class%)]{

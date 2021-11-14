@@ -1017,6 +1017,17 @@
                   (url->string* (path->url up-path))
                   "../index.html")
          `[onclick . ,(format "return GotoPLTRoot(\"~a\");" (version))]))
+      (define tocset-toggle
+        (make-element "tocsettoggle"
+                      (list
+                       sep-element
+                       (make-element
+                        (make-style #f (list
+                                        (make-target-url "javascript:void(0);")
+                                        (make-attributes
+                                         '([title . "show/hide table of contents"]
+                                           [onclick . "TocsetToggle();"]))))
+                        "contents"))))
       (define navleft
         `(span ([class "navleft"])
            ,@(if search-box?
@@ -1025,6 +1036,7 @@
            ,@(render
               sep-element
               (and up-path (make-element top-link top-content))
+              tocset-toggle
               ;; sep-element
               ;; (make-element
               ;;  (if parent (make-target-url "index.html" #f) "nonavigation")

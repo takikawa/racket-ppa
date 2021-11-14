@@ -19,6 +19,7 @@
   [struct nested-info ([values (listof check-info?)])]
   [struct verbose-info ([value any/c])]
   [struct dynamic-info ([proc (-> any/c)])]
+  [print-info-value (-> any/c any)]
   [info-value->string (-> any/c string?)]
   [current-check-info (parameter/c (listof check-info?))]
   [check-info-contains-key? (check-info-> symbol? boolean?)]
@@ -47,15 +48,22 @@
 (struct dynamic-info (proc) #:transparent)
 
 (define (info-value->string info-value)
+  (with-output-to-string
+    (lambda ()
+      (print-info-value info-value))))
+
+(define (print-info-value info-value)
   (cond
-    [(string-info? info-value) (string-info-value info-value)]
+    [(string-info? info-value) (display (string-info-value info-value))]
     [(location-info? info-value)
-     (trim-current-directory
-      (location->string (location-info-value info-value)))]
-    [(pretty-info? info-value) (pretty-format (pretty-info-value info-value))]
+     (display (trim-current-directory
+                (location->string (location-info-value info-value))))]
+    [(pretty-info? info-value)
+     (pretty-print (pretty-info-value info-value) #:newline? #f)]
     [(verbose-info? info-value)
-     (info-value->string (verbose-info-value info-value))]
-    [else (~s info-value)]))
+     (print-info-value (verbose-info-value info-value))]
+    [else
+     (write info-value)]))
 
 (define (trim-current-directory path)
   (define cd (path->string (current-directory)))

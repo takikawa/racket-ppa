@@ -147,7 +147,7 @@
       (let loop ([i 0])
         (unless (= i cnt)
           (let ([len (read-fixed-integer who port vers "header/footer extension length")])
-            (skip-data port vers len)
+            (skip-data who port vers len)
             (loop (add1 i)))))))
 
   (define (read-styles who port vers styles previously-read-bytes)
@@ -212,7 +212,7 @@
               (if (and class
                        (object? (snip-class-manager class)))
                   (send (snip-class-manager class) read-header (snip-class-version class) (header-stream header))
-                  (skip-data port vers len)))
+                  (skip-data who port vers len)))
             (loop (add1 i)))))))
 
   (define (read-snip who port vers header)
@@ -228,7 +228,7 @@
               (let ([style (read-integer who port vers "snip style index")])
                 (read-snip/given-class class who port vers header #f))
               (begin
-                (skip-data port vers len)
+                (skip-data who port vers len)
                 #""))))))
   
   (define (read-snip/given-class class who port vers header skip-buffer-data?)
@@ -275,7 +275,7 @@
                             (read-fixed-integer who port vers "data length"))])
               (if data-class
                   ((data-class-manager data-class) who port vers header)
-                  (skip-data port vers len))))
+                  (skip-data who port vers len))))
           (loop)))))
 
   ;; ----------------------------------------
@@ -291,36 +291,9 @@
       (read-error who "non-negative exact integer for string length" what port))
     (cond
       [(and (vers . >= . 10) (saved-as-raw-bytes? port))
-       (define (check-for expected-char)
-         (define got-char (read-char port))
-         (unless (equal? got-char expected-char)
-           (read-error who
-                       (format "expected a ~s when reading bytes, got ~s"
-                               expected-char
-                               got-char)
-                       what port)))
-       (let loop ()
-         (define c (peek-char port))
-         (when (char-whitespace? c)
-           (read-char port)
-           (loop)))
-       (check-for #\()
-       (define id (read-integer who port vers what))
-       (define size (read-integer who port vers what))
-       (check-for #\newline)
-       (define bts (read-bytes size port))
-       (unless (and (bytes? bts) (= (bytes-length bts) size))
-         (read-error who
-                     (format "expected ~a bytes, got ~a"
-                             size
-                             (if (bytes? bts)
-                                 (bytes-length bts)
-                                 bts))
-                     what port))
-       (hash-set! previously-read-bytes id bts)
-       (check-for #\newline)
-       (check-for #\))
-       bts]
+       (read-version-10-or-greater-bytes-that-we-already-know-is-there
+        port who what vers
+        previously-read-bytes)]
       [else
        (define s
          (cond
@@ -355,10 +328,61 @@
           (read-error who "byte string or byte-string list or reference to earlier byte-string"
                       what port)])]))
 
+  ;; previously-read-bytes : (or/c #f hash?)
+  ;;   if `previously-read-bytes` is #f, then we don't save the bytes,
+  ;;   we just skip over them in the stream, discarding them
+  (define (read-version-10-or-greater-bytes-that-we-already-know-is-there
+           port who what vers
+           previously-read-bytes)
+    (define (check-for expected-char)
+      (define got-char (read-char port))
+      (unless (equal? got-char expected-char)
+        (read-error who
+                    (format "expected a ~s when reading bytes, got ~s"
+                            expected-char
+                            got-char)
+                    what port)))
+    (let loop ()
+      (define c (peek-char port))
+      (when (char-whitespace? c)
+        (read-char port)
+        (loop)))
+    (check-for #\()
+    (define id (read-integer who port vers what))
+    (define size (read-integer who port vers what))
+    (check-for #\newline)
+    (define bts #f)
+    (cond
+      [previously-read-bytes
+       (set! bts (read-bytes size port))
+       (unless (and (bytes? bts) (= (bytes-length bts) size))
+         (read-error who
+                     (format "expected ~a bytes, got ~a"
+                             size
+                             (if (bytes? bts)
+                                 (bytes-length bts)
+                                 bts))
+                     what port))
+       (hash-set! previously-read-bytes id bts)]
+      [else
+       (let loop ([i size])
+         (unless (zero? i)
+           (read-byte port)
+           (loop (- i 1))))])
+    (check-for #\newline)
+    (check-for #\))
+    bts)
+
   ;; in version 10 writing bytes into the stream results in the raw bytes being written
   ;; out into the stream so we cannot just use `read` anymore. When this happens there
   ;; is always an open paren followed by two numbers; the first being the id of the
   ;; bytes (for duplicates written to the stream) and the second is the number of bytes
+  ;;
+  ;; also, it should always be the case that if `saved-as-raw-bytes?` returns #f,
+  ;; then we can safely skip over the next object in the stream by calling `plain-read`
+  ;; in other words, the only time when we see something nonreadable, we also see
+  ;; an open paren followed by those two numbers and we never see an open paren
+  ;; and two numbers in any other thing object to the stream
   (define (saved-as-raw-bytes? port)
     (define peek-port (peeking-input-port port))
     (define (get-next-non-whitespace)
@@ -452,11 +476,16 @@
            what expected port
            (file-position port)))
 
-  (define (skip-data port vers len)
+  (define (skip-data who port vers len)
     (if (vers . >= . 8)
         (let loop ([len len])
           (unless (zero? len)
-            (plain-read port)
+            (cond
+              [(and (vers . >= . 10) (saved-as-raw-bytes? port))
+               (read-version-10-or-greater-bytes-that-we-already-know-is-there
+                port who "skip-data" vers #f)]
+              [else
+               (plain-read port)])
             (loop (sub1 len))))
         (read-bytes len port)))
 
