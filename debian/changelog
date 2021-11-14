@@ -4,6 +4,20 @@ racket (8.1+ppa1-4~bionic1) bionic; urgency=medium
 
  -- Asumu Takikawa <asumu@racket-lang.org>  Sun, 23 May 2021 13:10:00 -0700
 
+racket (8.2+dfsg1-2) unstable; urgency=medium
+
+  * Re-upload to unstable.
+  * Bug fix: "build with -O2 to avoid misbuild with CFLAGS=-O3", thanks to
+    Steve Langasek (Closes: #935930).
+
+ -- David Bremner <bremner@debian.org>  Mon, 13 Sep 2021 20:48:34 -0300
+
+racket (8.2+dfsg1-1) experimental; urgency=medium
+
+  * New upstream release
+
+ -- David Bremner <bremner@debian.org>  Tue, 20 Jul 2021 11:05:19 -0300
+
 racket (8.0+dfsg1-4) experimental; urgency=medium
 
   * Bug fix: "missing Breaks+Replaces: racket-common (<< 8)", thanks
@@ -34,6 +48,14 @@ racket (8.0+dfsg1-1) experimental; urgency=medium
   * update debian/copyright for Chez Scheme bundle
 
  -- David Bremner <bremner@debian.org>  Sat, 10 Apr 2021 08:18:48 -0300
+
+racket (7.9+dfsg1-2) unstable; urgency=medium
+
+  * Bug fix: "CVE-2021-32773", thanks to Moritz Mühlenhoff (Closes:
+    #991327). Backport commit aa2e814a02 from racket 8.2. See also
+    https://github.com/racket/racket/issues/3923
+
+ -- David Bremner <bremner@debian.org>  Sat, 24 Jul 2021 11:13:09 -0300
 
 racket (7.9+dfsg1-1) unstable; urgency=medium
 
