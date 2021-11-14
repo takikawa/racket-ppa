@@ -450,7 +450,7 @@
              (let loop ([spec spec]
                         [level level])
                (define (add-to-level n) (and n level (+ n level)))
-               (syntax-case* spec (for-meta for-syntax for-template for-label just-meta)
+               (syntax-case* spec (for-meta for-syntax for-template for-label just-meta for-space just-space)
                    symbolic-compare?
                  [(for-meta phase specs ...)
                   (for ([spec (in-list (syntax->list #'(specs ...)))])
@@ -465,6 +465,12 @@
                   (for ([spec (in-list (syntax->list #'(specs ...)))])
                     (loop spec #f))]
                  [(just-meta phase specs ...)
+                  (for ([spec (in-list (syntax->list #'(specs ...)))])
+                    (loop spec level))]
+                 [(for-space #f specs ...)
+                  (for ([spec (in-list (syntax->list #'(specs ...)))])
+                    (loop spec level))]
+                 [(just-space #f specs ...)
                   (for ([spec (in-list (syntax->list #'(specs ...)))])
                     (loop spec level))]
                  [_
@@ -712,8 +718,8 @@
     (for ([vars (in-list (get-idss binders))])
       (for ([var (in-list vars)])
         (define varset (lookup-phase-to-mapping phase-to-varsets level))
-        (color-variable var 0 varset)
-        (document-variable var 0))))
+        (color-variable var level varset)
+        (document-variable var level))))
 
   (for ([(level+mods varrefs) (in-hash phase-to-varrefs)])
     (define level (list-ref level+mods 0))
@@ -971,25 +977,31 @@
 ;;                    -> (union #f (list require-sexp sym ?? module-path-index?))
 (define (get-module-req-path var phase-level #:nominal? [nominal-source-path? #t])
   (define binding (identifier-binding var phase-level))
-  (and (pair? binding)
-       (or (not (number? phase-level))
-           (= phase-level
-              (+ (list-ref binding 5)
-                 (list-ref binding 6))))
-       (let ([mod-path (if nominal-source-path? (list-ref binding 2) (list-ref binding 0))])
-         (cond
-           [(module-path-index? mod-path)
-            (let-values ([(base offset) (module-path-index-split mod-path)])
-              (list base
-                    (if nominal-source-path? (list-ref binding 3) (list-ref binding 1))
-                    (list-ref binding 5)
-                    mod-path))]
-           [(symbol? mod-path)
-            (list mod-path
-                  (if nominal-source-path? (list-ref binding 3) (list-ref binding 1))
-                  (list-ref binding 5)
-                  mod-path)]
-           [else #f]))))
+  (let/ec return
+    (unless (pair? binding) (return #f))
+    (define phase-shift+space (list-ref binding 5))
+    (define phase-shift (if (pair? phase-shift+space) (car phase-shift+space) phase-shift+space))
+    (define phase+space (list-ref binding 6))
+    (define phase (if (pair? phase+space) (car phase+space) phase+space))
+    (when (and (number? phase-level)
+               (not (= phase-level
+                       (+ phase-shift
+                          phase))))
+      (return #f))
+    (define mod-path (if nominal-source-path? (list-ref binding 2) (list-ref binding 0)))
+    (cond
+      [(module-path-index? mod-path)
+       (define-values (base offset) (module-path-index-split mod-path))
+       (list base
+             (if nominal-source-path? (list-ref binding 3) (list-ref binding 1))
+             phase-shift
+             mod-path)]
+      [(symbol? mod-path)
+       (list mod-path
+             (if nominal-source-path? (list-ref binding 3) (list-ref binding 1))
+             phase-shift
+             mod-path)]
+      [else #f])))
 
 ;; color/connect-top : namespace directory id-set syntax connections[see defn for ctc] -> void
 (define (color/connect-top user-namespace user-directory binders var connections
@@ -1304,7 +1316,7 @@
 
 ;; trim-require-prefix : syntax -> syntax
 (define (trim-require-prefix require-spec)
-  (syntax-case* require-spec (only prefix all-except prefix-all-except rename just-meta)
+  (syntax-case* require-spec (only prefix all-except prefix-all-except rename)
       symbolic-compare?
     [(only module-name identifier ...)
      (syntax module-name)]

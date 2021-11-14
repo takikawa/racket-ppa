@@ -213,8 +213,14 @@
                set-lang-wants-big-defs/ints-labels?
                get-tab
                last-position
-               get-surrogate
-               start-colorer
+               get-start-position
+               get-end-position
+               insert
+               delete
+               begin-edit-sequence
+               end-edit-sequence
+               position-paragraph
+               paragraph-start-position
                set-surrogate
                get-keymap)
       (define in-module-language? #f)      ;; true when we are in the module language
@@ -314,6 +320,10 @@
         (define mode (or (get-definitions-text-surrogate the-irl)
                          (new racket:text-mode%)))
         (send mode set-get-token (get-insulated-module-lexer the-irl))
+        (send mode set-matches
+              (call-read-language the-irl
+                                  'drracket:paren-matches
+                                  racket:default-paren-matches))
         (set-surrogate mode)
         
         (define lang-wants-big-defs/ints-labels?
@@ -334,6 +344,12 @@
         (set! indentation-function
               (or (call-read-language the-irl 'drracket:indentation #f)
                   (λ (x y) #f)))
+        (set! range-indentation-function
+              (or (call-read-language the-irl 'drracket:range-indentation #f)
+                  (λ (x y z) #f)))
+        (set! grouping-position
+              (or (call-read-language the-irl 'drracket:grouping-position #f)
+                  default-grouping-position))
 
         (set! lang-keymap (new keymap:aug-keymap%))
         (for ([key+proc (in-list (call-read-language the-irl 'drracket:keystrokes '()))])
@@ -373,6 +389,8 @@
         (set! extra-default-filters '())
         (set! default-extension "")
         (set! indentation-function (λ (x y) #f))
+        (set! range-indentation-function (λ (x y z) #f))
+        (set! grouping-position default-grouping-position)
         (when lang-keymap
           (send (get-keymap) remove-chained-keymap lang-keymap)
           (set! lang-keymap #f))
@@ -484,6 +502,8 @@
       (define extra-default-filters '())
       (define default-extension "")
       (define indentation-function (λ (x y) #f))
+      (define range-indentation-function (λ (x y z) #f))
+      (define grouping-position default-grouping-position)
       (define lang-keymap #f)
       (define/public (with-language-specific-default-extensions-and-filters t)
         (parameterize ([finder:default-extension default-extension]
@@ -499,7 +519,54 @@
                (compute-racket-amount-to-indent pos))]
           [else
            (compute-racket-amount-to-indent pos)]))
-      
+
+      (define/private (range-indent start end)
+        (define substs (range-indentation-function this start end))
+        (and substs
+             (let ()
+               (define start-line (position-paragraph start #f))
+               (define end-line (position-paragraph end #t))
+               (begin-edit-sequence)
+               (let loop ([substs substs] [line start-line])
+                 (unless (or (null? substs)
+                             (line . > . end-line))
+                   (define pos (paragraph-start-position line))
+                   (define del-amt (caar substs))
+                   (define insert-str (cadar substs))
+                   (unless (zero? del-amt)
+                     (delete pos (+ pos del-amt)))
+                   (unless (equal? insert-str "")
+                     (insert insert-str pos))
+                   (loop (cdr substs) (add1 line))))
+               (end-edit-sequence))))
+
+      (define/override (tabify-selection [start (get-start-position)]
+                                         [end (get-end-position)])
+        (unless (and in-module-language?
+                     (range-indent start end))
+          (super tabify-selection start end)))
+
+      (define/override (tabify-all)
+        (unless (and in-module-language?
+                     (range-indent 0 (last-position)))
+          (super tabify-all)))
+
+      (define/override (find-up-sexp start-pos)
+        (*-sexp start-pos 'up (λ () (super find-up-sexp start-pos))))
+      (define/override (find-down-sexp start-pos)
+        (*-sexp start-pos 'down (λ () (super find-down-sexp start-pos))))
+      (define/override (get-backward-sexp start-pos)
+        (*-sexp start-pos 'backward (λ () (super get-backward-sexp start-pos))))
+      (define/override (get-forward-sexp start-pos)
+        (*-sexp start-pos 'forward (λ () (super get-forward-sexp start-pos))))
+
+      (inherit get-limit)
+      (define/private (*-sexp start-pos direction do-super)
+        (define irl-answer (grouping-position this start-pos (get-limit start-pos) direction))
+        (cond
+          [(equal? irl-answer #t) (do-super)]
+          [else irl-answer]))
+
       (define/private (get-irl-directory)
         (define tmp-b (box #f))
         (define fn (get-filename tmp-b))
@@ -514,7 +581,8 @@
       (set! in-module-language? 
             (is-a? (drracket:language-configuration:language-settings-language (get-next-settings))
                    drracket:module-language:module-language<%>))))
-  
+
+  (define default-grouping-position (λ (text start limit dir) #t))
   
   (define no-more-online-expansion-handlers? #f)
   (define (no-more-online-expansion-handlers) (set! no-more-online-expansion-handlers? #t))

@@ -21,7 +21,7 @@ to go with the German textbooks
 )
 (
   @#,racket[(list-of sig)]
-  @#,racket[(nonempty-list-of sig)]
+  @#,racket[(cons-list-of sig)]
 )
 (
   @#,racket[empty]
@@ -45,7 +45,7 @@ Diese Signatur ist dann für einen Wert gültig, wenn dieser eine Liste ist,
 für dessen Elemente @racket[sig] gültig ist.
 }
 
-@defform[(nonempty-list-of sig)]{
+@defform[(cons-list-of sig)]{
 Diese Signatur ist dann für einen Wert gültig, wenn dieser eine nichtleere Liste ist,
 für dessen Elemente @racket[sig] gültig ist.
 }

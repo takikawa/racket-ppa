@@ -8,11 +8,11 @@
 (define heap-viz<%> (interface () update-view))
 
 (define horizontal-axis-height 0)
-(define vertical-axis-width 0)
 (define label-line-size 2)
 (define cell-horizontal-padding 6)
 (define cell-vertical-padding 4)
 (define vertical-axis-spacer 2)
+(define vertical-axis-width vertical-axis-spacer)
 
 (define-struct arrow (from to) #:transparent)
 
@@ -262,7 +262,7 @@
         (values (/ (+ (send arrow-point2 get-x) (send arrow-point3 get-x)) 2)
                 (/ (+ (send arrow-point2 get-y) (send arrow-point3 get-y)) 2))))
         
-    (define (cell->ltwh i)
+    (define/private (cell->ltwh i)
       (let* ([column (remainder i (vector-length column-widths))]
              [row (quotient i (vector-length column-widths))]
              [cell-x (vector-sum column-widths column)]

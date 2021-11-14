@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Libraries for @-expressions") (define pkg-authors (quote (eli mflatt))) (define version "1.2")))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Libraries for @-expressions") (define pkg-authors (quote (eli mflatt))) (define version "1.2") (define license (quote (Apache-2.0 OR MIT)))))

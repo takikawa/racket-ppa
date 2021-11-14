@@ -1577,6 +1577,13 @@
     @racket[open-input-text-editor] and then uses @racket[read] to parse the
     range of the buffer.})
 
+ (thing-doc
+  racket:default-paren-matches
+  (listof (list/c symbol? symbol?))
+  @{The default parentheses that are matched when using @racket[racket:text-mode-mixin].
+
+ @history[#:added "1.60"]})
+
  (proc-doc/names
   racket:add-preferences-panel
   (-> void?)
@@ -1979,10 +1986,20 @@
 
  (proc-doc/names
   color-prefs:add-to-preferences-panel
-  (string? ((is-a?/c vertical-panel%) . -> . void?) . -> . void?)
-  (name func)
+  (->* (string?
+        (-> (is-a?/c vertical-panel%) void?))
+       (#:style (listof (or/c 'border
+                              'hscroll 'auto-hscroll 'hide-hscroll
+                              'vscroll 'auto-vscroll 'hide-vscroll)))
+       void?)
+  ((name func) ((style '())))
   @{Calls @racket[func] with the subpanel of the preferences coloring panel
-    that corresponds to @racket[name].})
+ that corresponds to @racket[name].
+
+ The panel is created as a @racket[vertical-panel%], passing @racket[style] as the
+ @racket[style] argument to its constructor.
+
+ @history[#:changed "1.61" @list{Added the @racket[#:style] argument.}]})
 
  (proc-doc/names
   color-prefs:build-color-selection-panel

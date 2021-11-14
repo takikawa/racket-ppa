@@ -29,9 +29,9 @@ Anfängersprache für @|sdp|; siehe @sdp-ref["sdp-beginner"].
 @; ------------------------------------------------------------
 @section{@italic{Schreibe Dein Programm!}}
 
-@defmodule[deinprogramm/sdp/vanilla]
+@defmodule[deinprogramm/sdp]
 
-Das Modul @racketmodname[deinprogramm/sdp/vanilla] implementiert die
+Das Modul @racketmodname[deinprogramm/sdp] implementiert die
 Standardsprache für @|sdp|; siehe @sdp-ref["sdp-vanilla"].
 
 @; ------------------------------------------------------------
