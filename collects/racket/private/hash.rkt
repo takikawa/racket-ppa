@@ -1,20 +1,41 @@
 (module hash "pre-base.rkt"
-  (define (hash-keys h)
-    (let loop ([pos (hash-iterate-first h)])
-      (if pos
-          (cons (hash-iterate-key h pos)
-                (loop (hash-iterate-next h pos)))
-          null)))
+  (require '#%unsafe
+           (for-syntax "ellipses.rkt"))
 
-  (define (hash-values table)
-    (unless (hash? table)
-      (raise-argument-error 'hash-values "hash?" table))
-    (hash-map table (λ (k v) v)))
+  (define-syntax-rule (define/optional-try-order (name table try-order?)
+                        body0 body ...)
+    (define name
+      (let* ([name (λ (table try-order?)
+                     body0 body ...)]
+             [name
+              (case-lambda
+                [(table)
+                 (unless (hash? table)
+                   (raise-argument-error 'name "hash?" 0 table))
+                 (name table #f)]
+                [(table try-order?)
+                 (unless (hash? table)
+                   (raise-argument-error 'name "hash?" 0 table try-order?))
+                 (name table try-order?)])])
+        name)))
 
-  (define (hash->list table)
-    (unless (hash? table)
-      (raise-argument-error 'hash->list "hash?" table))
-    (hash-map table cons))
+  (define/optional-try-order (hash-keys h try-order?)
+    (if try-order?
+        (hash-map h (λ (k v) k) #t)
+        (let loop ([pos (hash-iterate-first h)])
+          (if pos
+              (let ([k (hash-iterate-key h pos unsafe-undefined)]
+                    [r (loop (hash-iterate-next h pos))])
+                (if (eq? k unsafe-undefined)
+                    r
+                    (cons k r)))
+              null))))
+
+  (define/optional-try-order (hash-values h try-order?)
+    (hash-map h (λ (k v) v) try-order?))
+
+  (define/optional-try-order (hash->list h try-order?)
+    (hash-map h cons try-order?))
 
   (define (paired-fold who pairs0 init proc)
     (let loop ([value init] [pairs pairs0])
@@ -61,6 +82,11 @@
        [(hash-equal? table) (make-weak-hash)]
        [(hash-eqv? table) (make-weak-hasheqv)]
        [(hash-eq? table) (make-weak-hasheq)])]
+     [(hash-ephemeron? table)
+      (cond
+        [(hash-equal? table) (make-ephemeron-hash)]
+        [(hash-eqv? table) (make-ephemeron-hasheqv)]
+        [(hash-eq? table) (make-ephemeron-hasheq)])]
      [else
       (cond
        [(hash-equal? table) (make-hash)]
