@@ -19,6 +19,8 @@ The @filepath{syntax-color} collection provides the underlying data
 structures and some helpful utilities for the @racket[color:text<%>]
 class of @racketmodname[framework].
 
+@table-of-contents[]
+
 @; ----------------------------------------------------------------------
 
 @section{Parenthesis Matching}
@@ -31,19 +33,62 @@ Parenthesis matching code built on top of @racket[token-tree%].
 
 @; ----------------------------------------------------------------------
 
-@section{Lexer Contract & the Don't Stop Structure Type}
+@section[#:tag "dont-stop"]{Lexer Contract and The Don't-Stop Structure Type}
 
 @defmodule[syntax-color/lexer-contract]
 
 @defthing[lexer/c contract?]{
-  Checks to be sure a lexing function is well-behaved. For more
+  Checks to be sure a lexing function is well-behaved, constrained to
+  functions where the second return value is a symbol. For more
   details, see @xmethod[color:text<%> start-colorer].
 }
+
+@defthing[lexer*/c contract?]{
+  Checks to be sure a lexing function is well-behaved. For more
+  details, see @xmethod[color:text<%> start-colorer].
+
+ @history[#:added "1.2"]}
 
 @defstruct*[dont-stop ([val any/c])]{
   A structure type used to indicate to the lexer that it should not
   allow itself to be interrupted. For more details,
   see @xmethod[color:text<%> start-colorer].
+}
+
+@defproc[(check-colorer-results-match-port-before-and-afters
+          [who symbol?]
+          [type any/c]
+          [pos-before (or/c exact-positive-integer? #f)]
+          [new-token-start (or/c exact-positive-integer? #f)]
+          [new-token-end (or/c exact-positive-integer? #f)]
+          [pos-after (or/c exact-positive-integer? #f)])
+         void?]{
+
+ Checks that the results of a colorer make sense with
+ respect to the positions of the port, before and after the
+ lexer is called.
+
+ The @racket[pos-before] argument is expected to be the third
+ result of @racket[port-next-location] before a lexer is
+ called and the @racket[pos-after] argument is expected to to
+ be the third result of @racket[port-next-location] after the
+ lexer is called. The @racket[type], @racket[token-start],
+ and @racket[token-end] arguments should be the corresponding
+ results from the colorer (c.f.
+ @method[color:text<%> start-colorer]).
+
+ This function raises an error unless the following boolean
+ expression is true:
+ @racketblock[(or (equal? type 'eof)
+                  (and (<= pos-before new-token-start pos-after)
+                       (<= pos-before new-token-end pos-after)))]
+ but it checks the individual parts of the expression to
+ raise a more meaningful error message when some part is not
+ true.
+
+ The @racket[who] argument is used to start the error message.
+
+ @history[#:added "1.4"]
 }
 
 @section{Racket Lexer}
@@ -79,6 +124,23 @@ The @racket[racket-lexer] function returns 5 values:
 
 }
 
+@defproc[(racket-lexer* [in input-port?]
+                        [offset exact-nonnegative-integer?]
+                        [mode any/c])
+         (values (or/c string? eof-object?) 
+                 (or/c symbol?
+                       (and/c (hash/c symbol? any/c) immutable?))
+                 (or/c symbol? #f) 
+                 (or/c number? #f) 
+                 (or/c number? #f)
+                 exact-nonnegative-integer?
+                 any/c)]{
+
+Like @racket[racket-lexer], but uses the extended lexer protocol to
+track and report regions that are commented out with @litchar{#;}.
+
+@history[#:added "1.2"]}
+
 @defproc[(racket-lexer/status [in input-port?]) 
          (values (or/c string? eof-object?) 
                  symbol?
@@ -93,6 +155,24 @@ datum, an opening parenthesis (or similar starting token to group
 other tokens), a closing parenthesis (or similar), or a prefix (such
 as whitespace) on a datum.}
 
+@defproc[(racket-lexer*/status [in input-port?]
+                               [offset exact-nonnegative-integer?]
+                               [mode any/c]) 
+         (values (or/c string? eof-object?) 
+                 (or/c symbol?
+                       (and/c (hash/c symbol? any/c) immutable?))
+                 (or/c symbol? #f) 
+                 (or/c number? #f) 
+                 (or/c number? #f)
+                 exact-nonnegative-integer?
+                 any/c
+                 (or/c 'datum 'open 'close 'continue))]{
+
+Like @racket[racket-lexer/status], but with comment tracking like
+@racket[racket-lexer*].
+
+@history[#:added "1.2"]}
+
 @defproc[(racket-nobar-lexer/status [in input-port?]) 
          (values (or/c string? eof-object?) 
                  symbol?
@@ -105,6 +185,23 @@ Like @racket[racket-lexer/status], except it treats
 @litchar{|} as a delimiter instead of quoting syntax for a symbol.
 This function is used by @racket[scribble-lexer].}
 
+@defproc[(racket-nobar-lexer*/status [in input-port?]
+                                     [offset exact-nonnegative-integer?]
+                                     [mode any/c]) 
+         (values (or/c string? eof-object?) 
+                 (or/c symbol?
+                       (and/c (hash/c symbol? any/c) immutable?))
+                 (or/c symbol? #f) 
+                 (or/c number? #f) 
+                 (or/c number? #f)
+                 exact-nonnegative-integer?
+                 any/c
+                 (or/c 'datum 'open 'close 'continue))]{
+
+Like @racket[racket-nobar-lexer/status], but with comment tracking like
+@racket[racket-lexer*].
+
+@history[#:added "1.2"]}
 
 @section{Default Lexer}
 @defmodule[syntax-color/default-lexer]
@@ -188,7 +285,9 @@ Like @racket[racket-lexer], but with several differences:
 
  @item{When @racket[mode] is a lexer procedure, the lexer is applied
        to @racket[in]. The lexer's results are returned, plus the
-       lexer again as the mode.}
+       lexer again as the mode; if the lexer produces a hash-table
+       attribute result, however, the @racket['type] value is
+       extracted and returned in place of the hash table.}
 
  @item{When @racket[mode] is a pair, then the lexer procedure in the
        @racket[car] is applied to @racket[in], @racket[offset], and the mode in the
@@ -197,6 +296,27 @@ Like @racket[racket-lexer], but with several differences:
 
 ]}
 
+@defproc[(module-lexer* [in input-port?]
+                        [offset exact-nonnegative-integer?]
+                        [mode (or/c #f
+                                    (-> input-port? any)
+                                    (cons/c (-> input-port? any/c any) any/c))])
+         (values (or/c string? eof-object?) 
+                 (or/c symbol?
+                       (and/c (hash/c symbol? any/c) immutable?))
+                 (or/c symbol? #f) 
+                 (or/c number? #f) 
+                 (or/c number? #f)
+                 exact-nonnegative-integer?
+                 (or/c #f 
+                       (-> input-port? any)
+                       (cons/c (-> input-port? any/c any) any/c)))]{
+
+Like @racket[module-lexer], except that the attribute result
+propagated from a language-specific lexer can be a hash table.
+
+@history[#:added "1.2"]}
+
 @section{Scribble Lexer}
 
 @defmodule[syntax-color/scribble-lexer]
@@ -204,23 +324,28 @@ Like @racket[racket-lexer], but with several differences:
 @defproc[(scribble-lexer [in input-port?]
                          [offset exact-nonnegative-integer?]
                          [mode any/c])
-         (values (or/c string? eof-object?) 
-                 symbol?
+         (values (or/c string? eof-object?)
+                 (or/c symbol?
+                       (and/c (hash/c symbol? any/c) immutable?))
                  (or/c symbol? #f) 
                  (or/c number? #f) 
                  (or/c number? #f)
                  exact-nonnegative-integer?
                  any/c)]{
 
-Like @racket[racket-lexer], but for Racket extended with Scribble's
+Like @racket[racket-lexer*], but for Racket extended with Scribble's
 @"@" notation (see @secref[#:doc '(lib
-"scribblings/scribble/scribble.scrbl") "reader"]).}
+"scribblings/scribble/scribble.scrbl") "reader"]).
+
+@history[#:changed "1.2" @elem{Changed to be like @racket[racket-lexer*]
+                               instead of @racket[racket-lexer].}]}
 
 @defproc[(scribble-inside-lexer [in input-port?]
                                 [offset exact-nonnegative-integer?]
                                 [mode any/c])
          (values (or/c string? eof-object?) 
-                 symbol?
+                 (or/c symbol?
+                       (and/c (hash/c symbol? any/c) immutable?))
                  (or/c symbol? #f) 
                  (or/c number? #f) 
                  (or/c number? #f)
@@ -228,7 +353,10 @@ Like @racket[racket-lexer], but for Racket extended with Scribble's
                  any/c)]{
 
 Like @racket[scribble-lexer], but starting in ``text'' mode instead of
-Racket mode.}
+Racket mode.
+
+@history[#:changed "1.2" @elem{Changed to be like @racket[racket-lexer*]
+                               instead of @racket[racket-lexer].}]}
 
 @defproc[(make-scribble-lexer [#:command-char at (and/c char? (not/c (or/c #\] #\[))) #\@])
          lexer/c]{
@@ -236,7 +364,8 @@ Racket mode.}
 Produces a lexer like @racket[scribble-lexer], but using
 @racket[at] in place of @litchar["@"].
 
-@history[#:added "1.1"]}
+@history[#:added "1.1"
+         #:changed "1.2" @elem{Changed like @racket[scribble-lexer].}]}
 
 
 @defproc[(make-scribble-inside-lexer [#:command-char at (and/c char? (not/c (or/c #\] #\[))) #\@])
@@ -245,7 +374,8 @@ Produces a lexer like @racket[scribble-lexer], but using
 Produces a lexer function like @racket[scribble-inside-lexer], but using
 @racket[at] in place of @litchar["@"].
 
-@history[#:added "1.1"]}
+@history[#:added "1.1"
+         #:changed "1.2" @elem{Changed like @racket[scribble-lexer].}]}
 
 @; ----------------------------------------------------------------------
 
@@ -314,3 +444,8 @@ Same as @racketblock[(insert-last! tree
                                         [data v]))]
 
 This optimization is important for the colorer.}
+
+@; ----------------------------------------------------------------------
+
+@include-section["color-textoid.scrbl"]
+@include-section["racket.scrbl"]

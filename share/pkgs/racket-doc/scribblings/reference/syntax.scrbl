@@ -1278,7 +1278,8 @@ multiple symbolic names.}
                                  (#,(racketidfont "for-syntax") raw-require-spec ...)
                                  (#,(racketidfont "for-template") raw-require-spec ...)
                                  (#,(racketidfont "for-label") raw-require-spec ...)
-                                 (#,(racketidfont "just-meta") phase-level raw-require-spec ...)]
+                                 (#,(racketidfont "just-meta") phase-level raw-require-spec ...)
+                                 (#,(racketidfont "portal") portal-id content)]
                [phase-level exact-integer
                             #f]
                [phaseless-spec spaceless-spec
@@ -1327,9 +1328,13 @@ formalized in the grammar above:
  @item{a @racketidfont{for-space} form cannot appear within a
        @racketidfont{for-space} form.}
 
+ @item{a @racketidfont{portal} form cannot appear within a
+       @racketidfont{just-meta} form.}
+
 ]
 
-Each @racket[raw-require-spec] corresponds to the obvious
+Except for the @racketidfont{portal} form, each
+@racket[raw-require-spec] corresponds to the obvious
 @racket[_require-spec], but the @racketidfont{rename} sub-form has the
 identifiers in reverse order compared to @racket[rename-in].
 
@@ -1345,8 +1350,14 @@ constructed expressions. They also appear naturally as arguments to
 functions such as @racket[namespace-require], with otherwise take a
 quoted @racket[raw-module-spec].
 
+The @racketidfont{portal} form provides a way to define @tech{portal
+syntax} at any phase level. A @racket[(#,(racketidfont "portal")
+portal-id content)], defines @racket[portal-id] to portal syntax with
+@racket[content] effectively quoted to serve as its content.
+
 @history[#:changed "8.2.0.3" @elem{Added @racketidfont{for-space}
-                                   and @racketidfont{just-space}.}]}
+                                   and @racketidfont{just-space}.}
+         #:changed "8.3.0.8" @elem{Added @racketidfont{portal}.}]}
 
 
 @defform/subs[(#%provide raw-provide-spec ...)
@@ -2099,7 +2110,7 @@ must be distinct according to @racket[bound-identifier=?].
     (list y x)))
 ]
 
-The second form evaluates the @racket[init-expr]s; the resulting
+The second form, usually known as @deftech{named @racket[let]}, evaluates the @racket[init-expr]s; the resulting
 values become arguments in an application of a procedure
 @racket[(lambda (id ...) body ...+)], where @racket[proc-id] is bound
 within the @racket[body]s to the procedure itself.}
@@ -2453,7 +2464,7 @@ result of @racket[val-expr]. If no such @racket[datum] is present, the
 @racket[case] form is @|void-const|.@margin-note{The @racket[case]
 form of @racketmodname[racket] differs from that of @other-manual['(lib
 "r6rs/scribblings/r6rs.scrbl")] or @other-manual['(lib
-"r5rs/r5rs.scrbl")] by being based @racket[equal?] instead of
+"r5rs/r5rs.scrbl")] by being based on @racket[equal?] instead of
 @racket[eqv?] (in addition to allowing internal definitions).}
 
 For the selected @racket[case-clause], the results of the last

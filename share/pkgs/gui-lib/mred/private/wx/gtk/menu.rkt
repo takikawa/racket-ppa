@@ -32,6 +32,12 @@
                                  (_fun _GtkWidget _pointer _pointer _pointer -> _void)
                                  _pointer _uint _uint32
                                  -> _void))
+(define-gtk gtk_menu_popup_at_rect (_fun _GtkWidget _GdkWindow
+                                         _GdkRectangle-pointer
+                                         _int _int
+                                         _pointer
+                                         -> _void)
+  #:fail (lambda () void))
 
 (define-gtk gtk_widget_get_screen (_fun _GtkWidget -> _GdkScreen))
 (define-gdk gdk_screen_get_width (_fun _GdkScreen -> _int))
@@ -123,32 +129,41 @@
   (define on-popup #f)
   (define cancel-none-box (box #t))
 
-  (define/public (popup x y queue-cb)
+  (define/public (popup x y in-gtk queue-cb)
     ;; Pin the menu object so that it is not garbage collected while displayed
     (hash-set! global-prevent-gc this #t)
     (set! on-popup queue-cb)
     (set! cancel-none-box (box #f))
-    (gtk_menu_popup gtk 
-                    #f 
-                    #f
-                    (lambda (menu _x _y _push)
-                      (let ([r (make-GtkRequisition 0 0)])
-                        (gtk_widget_size_request menu r)
-                        ;; Try to keep the menu on the screen:
-                        (let* ([s (gtk_widget_get_screen menu)]
-                               [sw (gdk_screen_get_width s)]
-                               [sh (gdk_screen_get_height s)])
-                          (ptr-set! _x _int (min (->screen x)
-                                                 (max 0
-                                                      (- sw
-                                                         (GtkRequisition-width r)))))
-                          (ptr-set! _y _int (min (->screen y)
-                                                 (max 0
-                                                      (- sh
-                                                         (GtkRequisition-height r))))))))
-                    #f
-                    0
-		    recent-event-time))
+    (cond
+     [(and in-gtk
+           (widget-window in-gtk))
+      => (lambda (win)
+           (gtk_menu_popup_at_rect gtk win
+                                   (make-GdkRectangle x y 1 1)
+                                   1 1
+                                   (synthesize-click-event win x y recent-event-time)))]
+     [else
+      (gtk_menu_popup gtk
+                      #f
+                      #f
+                      (lambda (menu _x _y _push)
+                        (let ([r (make-GtkRequisition 0 0)])
+                          (gtk_widget_size_request menu r)
+                          ;; Try to keep the menu on the screen:
+                          (let* ([s (gtk_widget_get_screen menu)]
+                                 [sw (gdk_screen_get_width s)]
+                                 [sh (gdk_screen_get_height s)])
+                            (ptr-set! _x _int (min (->screen x)
+                                                   (max 0
+                                                        (- sw
+                                                           (GtkRequisition-width r)))))
+                            (ptr-set! _y _int (min (->screen y)
+                                                   (max 0
+                                                        (- sh
+                                                           (GtkRequisition-height r))))))))
+                      #f
+                      0
+                      recent-event-time)]))
 
   (define ignore-callback? #f)
 
@@ -314,3 +329,20 @@
               (cdr items)]
              [else (cons (car items)
                          (loop (cdr items)))])))))
+
+;; ----------------------------------------
+
+(define (synthesize-click-event win x y recent-time)
+  (and wayland?
+       (make-GdkEventButton GDK_BUTTON_PRESS
+			    win
+			    1 ; send_event
+			    recent-time
+			    (exact->inexact x)
+			    (exact->inexact y)
+			    #f
+			    0 ; state
+			    1 ; button
+			    #f ; device
+			    (exact->inexact x)
+			    (exact->inexact y))))

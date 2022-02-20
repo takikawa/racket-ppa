@@ -47,7 +47,7 @@
   
 (define (get-insulated-module-lexer/inside)
   (unless module-lexer
-    (set! module-lexer (waive-option (dynamic-require 'syntax-color/module-lexer 'module-lexer))))
+    (set! module-lexer (waive-option (dynamic-require 'syntax-color/module-lexer 'module-lexer*))))
   module-lexer)
 
 (define (get-definitions-text-surrogate/inside)
@@ -195,6 +195,7 @@
     [(drracket:opt-out-toolbar-buttons drscheme:opt-out-toolbar-buttons drracket:opt-in-toolbar-buttons)
      (or/c #f (listof symbol?))]
     [(drracket:paren-matches) (or/c #f (listof (list/c symbol? symbol?)))]
+    [(drracket:quote-matches) (or/c #f (listof char?))]
     [else
      (error 'key->contract "unknown key")]))
 

@@ -49,6 +49,11 @@
     @racket[start].
   }
 
+  @defmethod*[#:mode override
+              (((get-backward-navigation-limit (start exact-integer?)) exact-integer?))]{
+    Calls @method[racket:text<%> get-limit].
+  }
+
   @defmethod*[(((balance-parens (key-event (is-a?/c key-event%))) void?))]{
     This function is called when the user types a close parenthesis in the
     @racket[text%].  If the close parenthesis that the user inserted does not
@@ -303,13 +308,22 @@
   The resulting mode assumes that it is only set to an editor that is the
   result of @racket[racket:text-mixin].
 
-  @defmethod*[#:mode override (((on-disable-surrogate) void?))]{
-    Removes the scheme keymap (see also @racket[racket:get-keymap]) and
+  @defconstructor[([include-paren-keymap? boolean? #t])]{
+  If @racket[include-paren-keymap?] is @racket[#f] only the
+  result of @racket[racket:get-non-paren-keymap] is used
+  by @method[racket:text-mode-mixin on-enable-surrogate];
+  otherwise the result of @racket[racket:get-keymap] is used.
+
+  @history[#:added "1.64"]
+ }
+
+  @defmethod[#:mode override (on-disable-surrogate) void?]{
+    Removes the racket keymap (see also @racket[racket:get-keymap]) and
     disables any parenthesis highlighting in the host editor.
   }
 
-  @defmethod*[#:mode override (((on-enable-surrogate) void?))]{
-    Adds the scheme keymap (see also @racket[racket:get-keymap]) and enables a
+  @defmethod[#:mode override (on-enable-surrogate) void?]{
+    Adds the racket keymap (see also @racket[racket:get-keymap]) and enables a
     parenthesis highlighting in the host editor.
   }
 }

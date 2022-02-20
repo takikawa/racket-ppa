@@ -389,8 +389,6 @@ please adhere to these guidelines:
  (fixup-open-brackets "Ajustar automaticamente parêntesis rectos de abertura")
  (fixup-close-parens "Ajustar automaticamente parêntesis de fecho")
  (flash-paren-match "Iluminar correcção de parêntesis")
- (auto-save-files "Auto-gravar ficheiros")
- (backup-files "Gravar ficheiros como backup")
  (map-delete-to-backspace "Mapar tecla de delete para backspace")
  (verify-exit "Verificar Saída")
  (ask-before-changing-format "Perguntar antes de modificar formato de gravação")
@@ -669,7 +667,7 @@ please adhere to these guidelines:
  ;;; autosaving
  (error-autosaving "Error autosaving \"~a\".") ;; ~a will be a filename
  (autosaving-turned-off "Autosaving is turned off\nuntil the file is saved.")
- (recover-autosave-files-frame-title "Recover Autosaved Files")
+ ;(recover-autosave-files-frame-title "Recover Autosaved Files")
  (autosave-details "Detalhes")
  (autosave-recover "Recuperar")
  (autosave-unknown-filename "<<desconhecido>>")
@@ -680,15 +678,15 @@ please adhere to these guidelines:
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "Ficheiro de auto-gravação:")
+  ;(autosave-autosave-label: "Ficheiro de auto-gravação:")
   (autosave-original-label: "Ficheiro original:")
-  (autosave-autosave-label "Ficheiro de auto-gravação")
+  ;(autosave-autosave-label "Ficheiro de auto-gravação")
   (autosave-original-label "Ficheiro original")
-  (autosave-compare-files "Comparar ficheiros de auto-gravação")
+  ;(autosave-compare-files "Comparar ficheiros de auto-gravação")
 
-  (autosave-show-autosave "Ficheiro de Autogravação") ;; title of a window showing the autosave file
+  ;(autosave-show-autosave "Ficheiro de Autogravação") ;; title of a window showing the autosave file
 
-  (autosave-explanation "O DrRacket encontro ficheiros de auto-gravação que poderá conter trabalho ainda não gravado.")
+  ;(autosave-explanation "O DrRacket encontro ficheiros de auto-gravação que poderá conter trabalho ainda não gravado.")
 
   (autosave-recovered! "Recuperado!") ;; status of an autosave file
   (autosave-deleted "Removido")       ;; status of an autosave file
@@ -699,7 +697,7 @@ please adhere to these guidelines:
   (autosave-done "Completo")
   
   ;; appears in the file dialog
-  (autosave-restore-to-where? "Escolha um local para gravar o ficheiro de auto-gravação.")
+  ;(autosave-restore-to-where? "Escolha um local para gravar o ficheiro de auto-gravação.")
   
   
  ;;; file modified warning

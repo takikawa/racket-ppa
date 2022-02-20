@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base" "future-visualizer" "typed-racket-lib"))) (define pkg-desc "type declarations for \"future-visualizer\"") (define pkg-authors (quote (jamesswaine)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base" "future-visualizer" "typed-racket-lib"))) (define pkg-desc "type declarations for \"future-visualizer\"") (define pkg-authors (quote (jamesswaine))) (define license (quote (Apache-2.0 OR MIT)))))

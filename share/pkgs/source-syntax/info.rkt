@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection "syntax") (define deps (quote ("base"))) (define pkg-desc "find mappings from expanded to source syntax") (define pkg-authors (quote (samth stamourv eli))) (define version "1.1")))
+(module info setup/infotab (#%module-begin (define collection "syntax") (define deps (quote ("base"))) (define pkg-desc "find mappings from expanded to source syntax") (define pkg-authors (quote (samth stamourv eli))) (define version "1.1") (define license (quote (Apache-2.0 OR MIT)))))

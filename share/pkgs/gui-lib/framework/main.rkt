@@ -1594,7 +1594,70 @@
   racket:get-keymap
   (-> (is-a?/c keymap%))
   ()
-  @{Returns a keymap with binding suitable for Racket.})
+  @{Returns a keymap with binding suitable for Racket; the keymap
+ is created with @racket[racket:setup-keymap] where the @racket[_paren-keymap]
+ is not @racket[#f] but a keymap, and that keymap is added to the result of
+ this function via @method[keymap% chain-to-keymap]. The @racket[_paren-keymap]
+ argument is also the result of @racket[racket:get-paren-keymap].})
+
+ (proc-doc/names
+  racket:get-paren-keymap
+  (-> (is-a?/c keymap%))
+  ()
+  @{Returns a keymap with binding suitable for the parentheses keystrokes in Racket; the keymap
+ is created and passed to @racket[racket:setup-keymap] as the @racket[_paren-keymap]
+  argument. See also @racket[racket:get-keymap]
+
+ @history[#:added "1.64"]})
+
+ (proc-doc/names
+  racket:get-non-paren-keymap
+  (-> (is-a?/c keymap%))
+  ()
+  @{Returns a keymap with all of the bindings in the keymap returned by
+ @racket[racket:get-keymap] except those in the keymap returned by
+ @racket[racket:get-paren-keymap]
+
+ @history[#:added "1.64"]})
+
+ (proc-doc/names
+  racket:add-pairs-keybinding-functions
+  (-> (is-a?/c keymap%) void?)
+  (keymap)
+  @{Adds keybindings that are intended to be bound to parenthesis characters
+    to @racket[keymap]. See @racket[racket:setup-keymap] for more information.
+
+ @history[#:added "1.64"]})
+
+ (proc-doc/names
+  racket:map-pairs-keybinding-functions
+  (->* ((is-a?/c keymap%) char? char?)
+       (#:alt-as-meta-keymap (or/c #f (is-a?/c keymap%)))
+       void?)
+  ((keymap open close) ([alt-as-meta-keymap #f]))
+  @{Binds a number of parenthesis-related keystrokes:
+
+ @itemlist[
+ @item{binds the keystroke of the character @racket[open] to
+    a function named @racket[(format "maybe-insert-~a~a-pair" open close)], unless @racket[open] is
+    @racket[#\[], in which case it is mapped to @racket["maybe-insert-[]-pair-maybe-fixup-[]"],}
+  @item{binds @racket[close] to @racket["balance-parens"]
+    unless @racket[open] and @racket[close] are the same character,}
+  @item{binds @racket[open] with the meta key modifier to @racket[(format "insert-~a~a-pair" open close)],}
+  @item{binds @racket[close] with the meta key modifier to
+   to @racket["balance-parens-forward"] unless the opening and closing characters are the same,}
+  @item{binds @racket[close], but with the prefix
+    @racket["~g:c:"] (e.g., @racket["~g:c:)"]) to the keystroke with the name
+    @racket[(format "non-clever-~a" close)], and}
+ @item{if @racket[open] is @racket[#\[], binds @racket["~g:c:["] to
+    @racket["non-clever-open-square-bracket"].}]
+
+ If any of these functions are no present in @racket[keymap], they are also added to it.
+
+ The @racket[alt-as-meta-keymap] argument is treated as
+  @racket[keymap:setup-global] treats it.
+
+ @history[#:added "1.64"]})
 
  (proc-doc/names
   racket:add-coloring-preferences-panel
@@ -1658,14 +1721,31 @@
  (proc-doc/names
   racket:setup-keymap
   (((is-a?/c keymap%))
-   (#:alt-as-meta-keymap (or/c #f (is-a?/c keymap%)))
+   (#:alt-as-meta-keymap (or/c #f (is-a?/c keymap%))
+    #:paren-keymap (or/c #f (is-a?/c keymap%))
+    #:paren-alt-as-meta-keymap (or/c #f (is-a?/c keymap%)))
    . ->* . void?)
-  ((keymap) ([alt-as-meta-keymap #f]))
-  @{Initializes @racket[keymap] with Racket-mode keybindings. The
-    @racket[alt-as-meta-keymap] argument is treated the same as
-    for @racket[keymap:setup-global].
+  ((keymap) ([alt-as-meta-keymap #f] [paren-keymap #f] [paren-alt-as-meta-keymap #f]))
+  @{Initializes @racket[keymap] with Racket-mode keybindings.
 
-    @history[#:changed "1.40" @elem{Added the @racket[#:alt-as-meta-keymap] argument.}]})
+    The @racket[alt-as-meta-keymap] argument is treated the same as
+    for @racket[keymap:setup-global]. The
+    @racket[paren-alt-as-meta-keymap] argument is similar, but matched
+    up with @racket[paren-keymap] and used only when @racket[paren-keymap]
+    is not @racket[#f].
+
+    The @racket[paren-keymap] is
+    filled with the keybindings that are bound to parentheses in
+    the default racket keymap, which is done by calling
+    @racket[racket:map-pairs-keybinding-functions] with the keymap
+    and the characters @racket[#\[] and @racket[#\]],
+     @racket[#\(] and @racket[#\)],
+     @racket[#\{] and @racket[#\}],
+     @racket[#\|] and @racket[#\|], and
+     @racket[#\"] and @racket[#\"].
+
+    @history[#:changed "1.40" @elem{Added the @racket[#:alt-as-meta-keymap] argument.}
+             #:changed "1.64" @elem{Added the @racket[#:paren-keymap] and @racket[paren-alt-as-meta-keymap] arguments.}]})
 
  (parameter-doc
   editor:doing-autosave?

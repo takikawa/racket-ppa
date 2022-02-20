@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "implementation (no documentation) part of \"distributed-places\"") (define pkg-authors (quote (tewk)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "implementation (no documentation) part of \"distributed-places\"") (define pkg-authors (quote (tewk))) (define license (quote (Apache-2.0 OR MIT)))))

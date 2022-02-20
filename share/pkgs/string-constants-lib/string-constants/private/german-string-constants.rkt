@@ -454,8 +454,8 @@
  (fixup-open-brackets "Öffnende eckige Klammern automatisch anpassen")
  (fixup-close-parens "Schließende Klammern automatisch anpassen")
  (flash-paren-match "Passende Klammer anblinken")
- (auto-save-files "Dateien automatisch abspeichern")
- (backup-files "Backup-Dateien")
+ (backup-unsaved-files "Backups für nicht gespeicherte Dateien anfertigen")
+ (first-change-files "Backup bei erster Änderung anfertigen")
  (map-delete-to-backspace "Entf löscht rückwärts")
  (verify-exit "Bei Verlassen nachfragen")
  (ask-before-changing-format "Vor Formatänderung beim Speichern nachfragen")
@@ -653,6 +653,7 @@
  (file-dne "Die Datei existiert nicht.")
  (empty-filename "Der Dateiname muss Buchstaben enthalten.")
  (that-is-dir-name "Dieser Name gehört zu einem Verzeichnis.")
+ (use-platform-specific-file-dialogs "Plattformspezifischen Datei-Auswahl-Dialoge benutzen") ;; a preferences option
  
  ;;; raw menu names -- these must match the 
  ;;; versions below, once the &s have been stripped.
@@ -847,7 +848,7 @@
  ;;; autosaving
  (error-autosaving "Fehler beim automatischen Speichern von „~a“.") ;; ~a will be a filename
  (autosaving-turned-off "Automatisches Speichern abgeschaltet\nbis die Datei wieder gespeichert wird.")
- (recover-autosave-files-frame-title "Automatisch gespeicherte Dateien zurückholen")
+ (recover-autosave-files-frame-title "Dateien zurückholen")
  (autosave-details "Details")
  (autosave-recover "Zurückholen")
  (autosave-unknown-filename "<<unbekannt>>")
@@ -887,15 +888,15 @@
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "Automatisch gespeicherte Datei:")
+  (autosave-autosave-label: "Backup-Datei:")
   (autosave-original-label: "Ursprüngliche Datei:")
-  (autosave-autosave-label "Automatisch gespeicherte Datei")
+  (autosave-autosave-label "Backup-Datei")
   (autosave-original-label "Ursprüngliche Datei")
-  (autosave-compare-files "Automatisch gespeicherte Dateien vergleichen")
+  (autosave-compare-files "Backup-Dateien vergleichen")
 
-  (autosave-show-autosave "Automatisch gespeicherte Datei") ;; title of a window showing the autosave file
+  (autosave-show-autosave "Backup-Datei") ;; title of a window showing the autosave file
 
-  (autosave-explanation "DrRacket hat automatisch gespeicherte Dateien gefunden, die nicht regulär gespeicherten Inhalt enthalten könnten.")
+  (autosave-explanation "DrRacket hat Backup-Dateien gefunden, die nicht regulär gespeicherten Inhalt enthalten könnten.")
 
   (autosave-recovered! "Zurückgeholt!") ;; status of an autosave file
   (autosave-deleted "Gelöscht")       ;; status of an autosave file
@@ -906,7 +907,7 @@
   (autosave-done "Fertig")
   
   ;; appears in the file dialog
-  (autosave-restore-to-where? "Bestimmen Sie, wo die automatisch gespeicherte Datei hin zurückgeholt werden soll")
+  (autosave-restore-to-where? "Wohin soll die Backup-Datei hin zurückgeholt werden?")
   
   
  ;;; file modified warning

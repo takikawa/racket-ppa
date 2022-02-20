@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Utilities for interoperating between testing frameworks") (define version "1.1") (define pkg-authors (quote (florence)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Utilities for interoperating between testing frameworks") (define version "1.1") (define pkg-authors (quote (florence))) (define license (quote (Apache-2.0 OR MIT)))))
