@@ -7,9 +7,12 @@
   
   (provide 
    (contract-out
-    [racket-lexer lexer/c])
+    [racket-lexer lexer/c]
+    [racket-lexer* lexer*/c])
    racket-lexer/status
-   racket-nobar-lexer/status)
+   racket-nobar-lexer/status
+   racket-lexer*/status
+   racket-nobar-lexer*/status)
    
   (define-lex-abbrevs
          
@@ -411,7 +414,46 @@
 
   (define racket-lexer/status (lexer/status identifier keyword bad-id))
   (define racket-nobar-lexer/status (lexer/status nobar-identifier nobar-keyword nobar-bad-id))
-  
+
+  (struct comment-mode (prev balance) #:prefab)
+  (define ((make-comment-tracking racket-lexer/status) in offset mode)
+    (define-values (lexeme type paren start end status)
+      (racket-lexer/status in))
+    (define attribs (if (and (comment-mode? mode)
+                             (not (eq? type 'eof)))
+                        (hash 'type type 'comment? #t)
+                        type))
+    (values lexeme attribs paren start end 0
+            (cond
+              [(eq? type 'sexp-comment)
+               (comment-mode mode 0)]
+              [(comment-mode? mode)
+               (case paren
+                 [(|(| |[| |{|)
+                  (struct-copy comment-mode mode
+                               [balance (add1 (comment-mode-balance mode))])]
+                 [(|)| |]| |}|)
+                  (define balance (sub1 (comment-mode-balance mode)))
+                  (if (zero? balance)
+                      (comment-mode-prev mode)
+                      (struct-copy comment-mode mode
+                                   [balance balance]))]
+                 [else
+                  (case status
+                    [(continue) mode]
+                    [else
+                     (if (zero? (comment-mode-balance mode))
+                         (comment-mode-prev mode)
+                         mode)])])])
+            status))
+
+  (define racket-lexer*/status (make-comment-tracking racket-lexer/status))
+  (define racket-nobar-lexer*/status (make-comment-tracking racket-nobar-lexer/status))
+
+  (define (racket-lexer* in offset mode)
+    (let-values ([(lexeme type paren start end backup mode adj) (racket-lexer*/status in offset mode)])
+      (values lexeme type paren start end backup mode)))
+
   (define (extend-error lexeme start end in)
     (define next (peek-char-or-special in))
     (if (or (char-whitespace? next)

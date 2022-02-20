@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("expeditor-lib" "expeditor-doc"))) (define implies (quote ("expeditor-lib" "expeditor-doc"))) (define pkg-desc "Terminal expression editor for Racket") (define pkg-authors (quote (mflatt))) (define license (quote (Apache-2.0 OR MIT)))))

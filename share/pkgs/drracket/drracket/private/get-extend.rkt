@@ -10,7 +10,7 @@
         [prefix drracket:debug: drracket:debug^]
         [prefix drracket:tracing: drracket:tracing^]
         [prefix drracket:module-language: drracket:module-language/int^]
-        [prefix drracket:module-language-tools: drracket:module-language-tools^])
+        [prefix drracket:module-language-tools: drracket:module-language-tools/int^])
 (export drracket:get/extend^)
 
 (define re-extension-allowed? #f)
@@ -108,10 +108,11 @@
   (make-extender get-base-unit-frame% 'drracket:unit:frame))
 
 (define (get-base-interactions-text%)
-  (drracket:module-language:module-language-online-expand-rep-mixin
-   (drracket:module-language:module-language-big-defs/ints-interactions-text-mixin
-    (drracket:debug:test-coverage-interactions-text-mixin
-     drracket:rep:text%))))
+  (drracket:module-language-tools:interactions-text-mixin
+   (drracket:module-language:module-language-online-expand-rep-mixin
+    (drracket:module-language:module-language-big-defs/ints-interactions-text-mixin
+     (drracket:debug:test-coverage-interactions-text-mixin
+      drracket:rep:text%)))))
 
 (define-values (extend-interactions-text get-interactions-text)
   (make-extender get-base-interactions-text% 'interactions-text%))

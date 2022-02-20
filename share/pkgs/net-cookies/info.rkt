@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define name "HTTP Cookies (RFC6265)") (define deps (quote ("net-cookies-lib" "net-cookies-doc"))) (define implies (quote ("net-cookies-lib" "net-cookies-doc"))) (define version "1.1.3")))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define name "HTTP Cookies (RFC6265)") (define deps (quote ("net-cookies-lib" "net-cookies-doc"))) (define implies (quote ("net-cookies-lib" "net-cookies-doc"))) (define version "1.1.3") (define license (quote (Apache-2.0 OR MIT)))))

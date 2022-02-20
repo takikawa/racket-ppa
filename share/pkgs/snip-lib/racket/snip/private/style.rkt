@@ -5,7 +5,7 @@
          racket/draw
          racket/draw/private/syntax
          racket/draw/private/font-syms
-         (only-in racket/draw/private/color color-red color-blue color-green)
+         (only-in racket/draw/private/color color-red color-blue color-green color-alpha)
          racket/snip/private/private
          "prefs.rkt")
 
@@ -40,29 +40,35 @@
   (define r 0.0)
   (define g 0.0)
   (define b 0.0)
+  (define a 1.0)
 
   (super-new)
 
-  (def/public (get [box? rb] [box? gb] [box? bb])
+  (def/public (get [box? rb] [box? gb] [box? bb] [(make-or-false box?) [ab #f]])
     (set-box! rb r)
     (set-box! gb g)
-    (set-box! bb b))
+    (set-box! bb b)
+    (when ab (set-box! ab a)))
 
-  (def/public (set [real? rf] [real? gf] [real? bf])
+  (def/public (set [real? rf] [real? gf] [real? bf] [real? [af 1.0]])
     (set! r rf)
     (set! g gf)
-    (set! b bf))
+    (set! b bf)
+    (set! a af))
 
   (def/public (get-r) r)
   (def/public (get-g) g)
   (def/public (get-b) b)
+  (def/public (get-a) a)
 
   (def/public (set-r [real? v])
     (set! r v))
   (def/public (set-g [real? v])
     (set! g v))
   (def/public (set-b [real? v])
-    (set! b v)))
+    (set! b v))
+  (def/public (set-a [real? v])
+    (set! a v)))
 
 (define mult-color<%> (class->interface mult-color%))
 
@@ -71,29 +77,35 @@
   (define r 0)
   (define g 0)
   (define b 0)
+  (define a 0.0)
 
   (super-new)
 
-  (def/public (get [box? rb] [box? gb] [box? bb])
+  (def/public (get [box? rb] [box? gb] [box? bb] [(make-or-false box?) [ab #f]])
     (set-box! rb r)
     (set-box! gb g)
-    (set-box! bb b))
+    (set-box! bb b)
+    (when ab (set-box! ab a)))
 
-  (def/public (set [exact-integer? rf] [exact-integer? gf] [exact-integer? bf])
+  (def/public (set [exact-integer? rf] [exact-integer? gf] [exact-integer? bf] [real? [af 0.0]])
     (set! r rf)
     (set! g gf)
-    (set! b bf))
+    (set! b bf)
+    (set! a af))
 
   (def/public (get-r) r)
   (def/public (get-g) g)
   (def/public (get-b) b)
+  (def/public (get-a) a)
 
   (def/public (set-r [exact-integer? v])
     (set! r v))
   (def/public (set-g [exact-integer? v])
     (set! g v))
   (def/public (set-b [exact-integer? v])
-    (set! b v)))
+    (set! b v))
+  (def/public (set-a [real? v])
+    (set! a v)))
 
 (define add-color<%> (class->interface add-color%))
 
@@ -363,8 +375,8 @@
                    col)])
       (set! transparent-text-backing-on #f)
       (set! transparent-text-backing-off #t)
-      (send background-mult set 0 0 0)
-      (send background-add set (send col red) (send col green) (send col blue))
+      (send background-mult set 0 0 0 0.0)
+      (send background-add set (send col red) (send col green) (send col blue) (send col alpha))
       this))
 
   (def/public (set-delta-foreground [(lambda (x) (or (string? x) (x . is-a? . color%))) col])
@@ -372,8 +384,8 @@
                    (or (send the-color-database find-color col)
                        black-color)
                    col)])
-      (send foreground-mult set 0 0 0)
-      (send foreground-add set (send col red) (send col green) (send col blue))
+      (send foreground-mult set 0 0 0 0.0)
+      (send foreground-add set (send col red) (send col green) (send col blue) (send col alpha))
       this))
 
   (def/public (collapse [style-delta% delta-in])
@@ -393,22 +405,24 @@
              (not (= size-mult 1.0))
              (not (zero? (style-delta-size-add delta-in))))
         #f ; no collapse
-        (let-boxes ([ambr 0] [ambb 0] [ambg 0]
-                    [amfr 0] [amfb 0] [amfg 0]
-                    [babr 0] [babb 0] [babg 0]
-                    [bafr 0] [bafb 0] [bafg 0])
+        (let-boxes ([ambr 0] [ambb 0] [ambg 0] [amba 0]
+                    [amfr 0] [amfb 0] [amfg 0] [amfa 0]
+                    [babr 0] [babb 0] [babg 0] [baba 0]
+                    [bafr 0] [bafb 0] [bafg 0] [bafa 0])
             (begin
-              (send foreground-mult get amfr amfb amfg)
-              (send background-mult get ambr ambb ambg)
-              (send (style-delta-foreground-add delta-in) get bafr bafb bafg)
-              (send (style-delta-background-add delta-in) get babr babb babg))
+              (send foreground-mult get amfr amfb amfg amfa)
+              (send background-mult get ambr ambb ambg amba)
+              (send (style-delta-foreground-add delta-in) get bafr bafb bafg bafa)
+              (send (style-delta-background-add delta-in) get babr babb babg baba))
           (cond
            [(or (and (not (zero? amfr)) (not (= amfr 1.0)) (not (zero? bafr)))
                 (and (not (zero? amfg)) (not (= amfg 1.0)) (not (zero? bafg)))
                 (and (not (zero? amfb)) (not (= amfb 1.0)) (not (zero? bafb)))
+                (and (not (zero? amfa)) (not (= amfa 1.0)) (not (zero? bafa)))
                 (and (not (zero? ambr)) (not (= ambr 1.0)) (not (zero? babr)))
                 (and (not (zero? ambg)) (not (= ambg 1.0)) (not (zero? babg)))
-                (and (not (zero? ambb)) (not (= ambb 1.0)) (not (zero? babb))))
+                (and (not (zero? ambb)) (not (= ambb 1.0)) (not (zero? babb)))
+                (and (not (zero? amba)) (not (= amba 1.0)) (not (zero? baba))))
             #f] ; no collapse
            ;; cases: simple or double toggle
            ;;        no further change
@@ -424,29 +438,31 @@
            [(noncollapsable? transparent-text-backing #f) #f]
            [else
             ;; collapsing is possible
-            (let-boxes ([bmbr 0] [bmbb 0] [bmbg 0]
-                        [bmfr 0] [bmfb 0] [bmfg 0]
-                        [aabr 0] [aabb 0] [aabg 0]
-                        [aafr 0] [aafb 0] [aafg 0])
-                (begin (send (style-delta-foreground-mult delta-in) get bmfr bmfb bmfg)
-                       (send (style-delta-background-mult delta-in) get bmbr bmbb bmbg)
-                       (send foreground-add get aafr aafb aafg)
-                       (send background-add get aabr aabb aabg))
+            (let-boxes ([bmbr 0] [bmbb 0] [bmbg 0] [bmba 0]
+                        [bmfr 0] [bmfb 0] [bmfg 0] [bmfa 0]
+                        [aabr 0] [aabb 0] [aabg 0] [aaba 0]
+                        [aafr 0] [aafb 0] [aafg 0] [aafa 0])
+                (begin (send (style-delta-foreground-mult delta-in) get bmfr bmfb bmfg bmfa)
+                       (send (style-delta-background-mult delta-in) get bmbr bmbb bmbg bmba)
+                       (send foreground-add get aafr aafb aafg aafa)
+                       (send background-add get aabr aabb aabg aaba))
               
               (set! size-add (+ size-add
                                 (->long (* size-mult (style-delta-size-add delta-in)))))
               (set! size-mult (* size-mult (style-delta-size-mult delta-in)))
 
-              (send foreground-mult set (* amfr bmfr) (* amfb bmfb) (* amfg bmfg))
-              (send background-mult set (* ambr bmbr) (* ambb bmbb) (* ambg bmbg))
-              (send foreground-add set 
+              (send foreground-mult set (* amfr bmfr) (* amfb bmfb) (* amfg bmfg) (* amfa bmfa))
+              (send background-mult set (* ambr bmbr) (* ambb bmbb) (* ambg bmbg) (* amba bmba))
+              (send foreground-add set
                     (+ aafr (->long (* amfr bafr)))
                     (+ aafb (->long (* amfb bafb)))
-                    (+ aafg (->long (* amfg bafg))))
-              (send background-add set 
+                    (+ aafg (->long (* amfg bafg)))
+                    (+ aafa (* amfa bafa)))
+              (send background-add set
                     (+ aabr (->long (* ambr babr)))
                     (+ aabb (->long (* ambb babb)))
-                    (+ aabg (->long (* ambg babg))))
+                    (+ aabg (->long (* ambg babg)))
+                    (+ aaba (* amba baba)))
 
               (when (eq? family 'base)
                 (set! family (style-delta-family delta-in))
@@ -482,12 +498,12 @@
       (and (eq? (-on fld) ((-don fld) delta-in))
            (eq? (-off fld) ((-doff fld) delta-in))))
     (define-syntax-rule (same-color? fld)
-      (let-boxes ([r1 0] [g1 0] [b1 0]
-                  [r2 0] [g2 0] [b2 0])
+      (let-boxes ([r1 0] [g1 0] [b1 0] [a1 0]
+                  [r2 0] [g2 0] [b2 0] [a2 0])
           (begin
-            (send fld get r1 g1 b1)
-            (send ((-d fld) delta-in) get r2 g2 b2))
-        (and (= r1 r2) (= g1 g2) (= b1 b2))))
+            (send fld get r1 g1 b1 a1)
+            (send ((-d fld) delta-in) get r2 g2 b2 a2))
+        (and (= r1 r2) (= g1 g2) (= b1 b2) (= a1 a2))))
     (and (eq? family (style-delta-family delta-in))
          (or (eq? face (style-delta-face delta-in))
              (and (string? face)
@@ -511,9 +527,9 @@
     (define-syntax-rule (DCOPY fld)
       (set! fld ((-d fld) in)))
     (define-syntax-rule (DCOPY/c fld)
-      (let-boxes ([r 0][g 0][b 0])
-          (send ((-d fld) in) get r g b)
-        (send fld set r g b)))
+      (let-boxes ([r 0] [g 0] [b 0] [a 0])
+          (send ((-d fld) in) get r g b a)
+        (send fld set r g b a)))
     (DCOPY family)
     (DCOPY face)
     (DCOPY size-mult)
@@ -547,7 +563,7 @@
 (define-delta style-off)
 (define-delta smoothing-on)
 (define-delta smoothing-off)
-(define-delta  underlined-on)
+(define-delta underlined-on)
 (define-delta underlined-off)
 (define-delta size-in-pixels-on)
 (define-delta size-in-pixels-off)
@@ -757,19 +773,21 @@
                 (let ([combine-colors! (lambda (src-col src-mul src-add dest)
                                          (let ([r (send src-col red)]
                                                [g (send src-col green)]
-                                               [b (send src-col blue)])
-                                           (let-boxes ([rm 0.0] [gm 0.0] [bm 0.0]
-                                                       [rp 0] [gp 0] [bp 0])
+                                               [b (send src-col blue)]
+                                               [a (send src-col alpha)])
+                                           (let-boxes ([rm 0.0] [gm 0.0] [bm 0.0] [am 0.0]
+                                                       [rp 0] [gp 0] [bp 0] [ap 0.0])
                                                (begin
-                                                 (send src-mul get rm gm bm)
-                                                 (send src-add get rp gp bp))
+                                                 (send src-mul get rm gm bm am)
+                                                 (send src-add get rp gp bp ap))
                                              (let ([->color
                                                     (lambda (v)
                                                       (max (min 255 (->long v)) 0))])
                                                (send dest set
                                                      (->color (+ (* r rm) rp))
                                                      (->color (+ (* g gm) gp))
-                                                     (->color (+ (* b bm) bp)))))))])
+                                                     (->color (+ (* b bm) bp))
+                                                     (max 0.0 (min 1.0 (+ (* a am) ap))))))))])
                   (combine-colors! (send base get-s-foreground)
                                    (style-delta-foreground-mult nonjoin-delta)
                                    (style-delta-foreground-add nonjoin-delta)
@@ -869,26 +887,28 @@
 
             (s-update #f #f #t #t #t))))))
 
-  (define/private (color->rgb c)
-    (values (color-red c) (color-green c) (color-blue c)))
+  (define/private (color->rgba c)
+    (values (color-red c) (color-green c) (color-blue c) (color-alpha c)))
 
   (def/public (switch-to [dc<%> dc] [(make-or-false style<%>) old-style])
-    (let-values ([(afr afg afb) (if old-style (color->rgb (style->foreground old-style)) (values 0 0 0))]
-                 [(bfr bfg bfb) (color->rgb s-foreground)]
-                 [(abr abg abb) (if old-style (color->rgb (style->background old-style)) (values 0 0 0))]
-                 [(bbr bbg bbb) (color->rgb s-background)])
+    (let-values ([(afr afg afb afa) (if old-style (color->rgba (style->foreground old-style)) (values 0 0 0 1.0))]
+                 [(bfr bfg bfb bfa) (color->rgba s-foreground)]
+                 [(abr abg abb aba) (if old-style (color->rgba (style->background old-style)) (values 0 0 0 1.0))]
+                 [(bbr bbg bbb bba) (color->rgba s-background)])
       (when (or (not old-style)
                 (not (eq? (send old-style get-s-font) s-font)))
         (send dc set-font s-font))
       (when (or (not old-style)
                 (not (= afr bfr))
                 (not (= afb bfb))
-                (not (= afg bfg)))
+                (not (= afg bfg))
+                (not (= afa bfa)))
         (send dc set-text-foreground s-foreground))
       (when (or (not old-style)
                 (not (= abr bbr))
                 (not (= abb bbb))
-                (not (= abg bbg)))
+                (not (= abg bbg))
+                (not (= aba bba)))
         (send dc set-text-background s-background))
       (when (or (not old-style)
                 (not (eq? (send old-style get-s-pen) pen)))
@@ -1390,20 +1410,32 @@
 
                          (let ([r (send f get-inexact)]
                                [g (send f get-inexact)]
-                               [b (send f get-inexact)])
-                           (send (send delta get-foreground-mult) set r g b))
+                               [b (send f get-inexact)]
+                               [a (if ((send f get-wxme-version) . < . 11)
+                                      1.0
+                                      (send f get-inexact))])
+                           (send (send delta get-foreground-mult) set r g b a))
                          (let ([r (send f get-inexact)]
                                [g (send f get-inexact)]
-                               [b (send f get-inexact)])
-                           (send (send delta get-background-mult) set r g b))
+                               [b (send f get-inexact)]
+                               [a (if ((send f get-wxme-version) . < . 11)
+                                      1.0
+                                      (send f get-inexact))])
+                           (send (send delta get-background-mult) set r g b a))
                          (let ([r (send f get-exact)]
                                [g (send f get-exact)]
-                               [b (send f get-exact)])
-                           (send (send delta get-foreground-add) set r g b))
+                               [b (send f get-exact)]
+                               [a (if ((send f get-wxme-version) . < . 11)
+                                      0.0
+                                      (send f get-inexact))])
+                           (send (send delta get-foreground-add) set r g b a))
                          (let ([r (send f get-exact)]
                                [g (send f get-exact)]
-                               [b (send f get-exact)])
-                           (send (send delta get-background-add) set r g b)
+                               [b (send f get-exact)]
+                               [a (if ((send f get-wxme-version) . < . 11)
+                                      0.0
+                                      (send f get-inexact))])
+                           (send (send delta get-background-add) set r g b a)
 
                            (when (<= 1 (send f get-wxme-version) 2)
                              (when (or (positive? r) (positive? g) (positive? b))
@@ -1487,18 +1519,18 @@
                    (send f put (if (style-delta-transparent-text-backing-on delta) 1 0))
                    (send f put (if (style-delta-transparent-text-backing-off delta) 1 0))
 
-                   (let-boxes ([r 0.0][g 0.0][b 0.0])
-                       (send (style-delta-foreground-mult delta) get r g b)
-                     (send f put r) (send f put g) (send f put b))
-                   (let-boxes ([r 0.0][g 0.0][b 0.0])
-                       (send (style-delta-background-mult delta) get r g b)
-                     (send f put r) (send f put g) (send f put b))
-                   (let-boxes ([r 0][g 0][b 0])
-                       (send (style-delta-foreground-add delta) get r g b)
-                     (send f put r) (send f put g) (send f put b))
-                   (let-boxes ([r 0][g 0][b 0])
-                       (send (style-delta-background-add delta) get r g b)
-                     (send f put r) (send f put g) (send f put b))
+                   (let-boxes ([r 0.0] [g 0.0] [b 0.0] [a 0.0])
+                       (send (style-delta-foreground-mult delta) get r g b a)
+                     (send f put r) (send f put g) (send f put b) (send f put a))
+                   (let-boxes ([r 0.0] [g 0.0] [b 0.0] [a 0.0])
+                       (send (style-delta-background-mult delta) get r g b a)
+                     (send f put r) (send f put g) (send f put b) (send f put a))
+                   (let-boxes ([r 0] [g 0] [b 0] [a 0.0])
+                       (send (style-delta-foreground-add delta) get r g b a)
+                     (send f put r) (send f put g) (send f put b) (send f put a))
+                   (let-boxes ([r 0] [g 0] [b 0] [a 0.0])
+                       (send (style-delta-background-add delta) get r g b a)
+                     (send f put r) (send f put g) (send f put b) (send f put a))
 
                    (send f put (align-this-to-standard (style-delta-alignment-on delta)))
                    (send f put (align-this-to-standard (style-delta-alignment-off delta)))))))

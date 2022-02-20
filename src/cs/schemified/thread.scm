@@ -846,20 +846,48 @@
               prng_0))
            (+ min_0 (random d_0 prng_0)))))))))
 (define hash-keys
-  (lambda (h_0)
-    (letrec*
-     ((loop_0
-       (|#%name|
-        loop
-        (lambda (pos_0)
-          (begin
-            (if pos_0
-              (let ((k_0 (hash-iterate-key h_0 pos_0 unsafe-undefined)))
-                (let ((r_0 (loop_0 (hash-iterate-next h_0 pos_0))))
-                  (let ((k_1 k_0))
-                    (if (eq? k_1 unsafe-undefined) r_0 (cons k_1 r_0)))))
-              null))))))
-     (loop_0 (hash-iterate-first h_0)))))
+  (let ((hash-keys_0
+         (|#%name|
+          hash-keys
+          (lambda (h_0 try-order?_0)
+            (begin
+              (if try-order?_0
+                (hash-map h_0 (lambda (k_0 v_0) k_0) #t)
+                (letrec*
+                 ((loop_0
+                   (|#%name|
+                    loop
+                    (lambda (pos_0)
+                      (begin
+                        (if pos_0
+                          (let ((k_0
+                                 (hash-iterate-key
+                                  h_0
+                                  pos_0
+                                  unsafe-undefined)))
+                            (let ((r_0 (loop_0 (hash-iterate-next h_0 pos_0))))
+                              (let ((k_1 k_0))
+                                (if (eq? k_1 unsafe-undefined)
+                                  r_0
+                                  (cons k_1 r_0)))))
+                          null))))))
+                 (loop_0 (hash-iterate-first h_0)))))))))
+    (|#%name|
+     hash-keys
+     (case-lambda
+      ((h_0)
+       (begin
+         (begin
+           (if (hash? h_0)
+             (void)
+             (raise-argument-error 'hash-keys "hash?" 0 h_0))
+           (hash-keys_0 h_0 #f))))
+      ((h_0 try-order?_0)
+       (begin
+         (if (hash? h_0)
+           (void)
+           (raise-argument-error 'hash-keys "hash?" 0 h_0 try-order?_0))
+         (hash-keys_0 h_0 try-order?_0)))))))
 (define hash-empty?
   (lambda (table_0)
     (begin
@@ -1699,7 +1727,7 @@
        0.0
        (/
         (let ((app_0 (if timeout-at_0 timeout-at_0 (|#%app| distant-future))))
-          (- app_0 (current-inexact-milliseconds)))
+          (- app_0 (current-inexact-monotonic-milliseconds)))
         1000.0))))
    (lambda (wakeup_0)
      (if (let ((t_0 (unsafe-place-local-ref cell.3$1)))
@@ -1709,7 +1737,7 @@
         (lambda () (min-key+value (unsafe-place-local-ref cell.3$1)))
         (case-lambda
          ((timeout-at_0 threads_0)
-          (if (<= timeout-at_0 (current-inexact-milliseconds))
+          (if (<= timeout-at_0 (current-inexact-monotonic-milliseconds))
             (if (null? threads_0)
               (void)
               (begin
@@ -1787,7 +1815,7 @@
 (define effect_2775
   (begin (void (current-sandman the-default-sandman)) (void)))
 (define distant-future
-  (lambda () (+ (current-inexact-milliseconds) 31536000000.0)))
+  (lambda () (+ (current-inexact-monotonic-milliseconds) 31536000000.0)))
 (define current-atomic (make-pthread-parameter 0))
 (define current-thread/in-atomic (make-pthread-parameter #f))
 (define current-future$1 (make-pthread-parameter #f))
@@ -1802,6 +1830,8 @@
           (current-atomic n_0)
           (do-end-atomic-callback))
         (if (fx< n_0 0) (bad-end-atomic) (current-atomic n_0))))))
+(define abort-atomic
+  (lambda () (begin (current-atomic 0) (end-atomic-callback 0))))
 (define do-end-atomic-callback
   (lambda ()
     (let ((cbs_0 (end-atomic-callback)))
@@ -7144,20 +7174,27 @@
   (lambda (t_0 timeout-at_0)
     (begin
       (if (thread-descheduled? t_0)
-        (internal-error "tried to deschedule a descheduled thread")
-        (void))
-      (set-thread-descheduled?! t_0 #t)
-      (thread-group-remove! (thread-parent t_0) t_0)
-      (|#%app| thread-unscheduled-for-work-tracking! t_0)
-      (if timeout-at_0
-        (add-to-sleeping-threads!
-         t_0
-         (begin-unsafe
-          (|#%app| (sandman-do-merge-timeout the-sandman) #f timeout-at_0)))
-        (void))
-      (if (eq? t_0 (current-thread/in-atomic))
-        (|#%app| thread-did-work!)
-        (void))
+        (if (eq? (thread-descheduled? t_0) 'terribly-wrong)
+          (void)
+          (begin
+            (set-thread-descheduled?! t_0 'terribly-wrong)
+            (internal-error "tried to deschedule a descheduled thread")))
+        (begin
+          (set-thread-descheduled?! t_0 #t)
+          (thread-group-remove! (thread-parent t_0) t_0)
+          (|#%app| thread-unscheduled-for-work-tracking! t_0)
+          (if timeout-at_0
+            (add-to-sleeping-threads!
+             t_0
+             (begin-unsafe
+              (|#%app|
+               (sandman-do-merge-timeout the-sandman)
+               #f
+               timeout-at_0)))
+            (void))
+          (if (eq? t_0 (current-thread/in-atomic))
+            (|#%app| thread-did-work!)
+            (void))))
       (lambda ()
         (if (eq? t_0 (1/current-thread))
           (begin
@@ -7170,8 +7207,10 @@
                     (if (positive? (current-atomic))
                       (if (|#%app| force-atomic-timeout-callback)
                         (loop_0)
-                        (internal-error
-                         "attempt to deschedule the current thread in atomic mode"))
+                        (begin
+                          (abort-atomic)
+                          (internal-error
+                           "attempt to deschedule the current thread in atomic mode")))
                       (void)))))))
              (loop_0))
             (engine-block))
@@ -7746,7 +7785,9 @@
                   (thread-yield #f)
                   (let ((until-msecs_0
                          (let ((app_0 (* secs20_0 1000.0)))
-                           (+ app_0 (current-inexact-milliseconds)))))
+                           (+
+                            app_0
+                            (current-inexact-monotonic-milliseconds)))))
                     (letrec*
                      ((loop_0
                        (|#%name|
@@ -7969,7 +8010,7 @@
   (lambda (thd_0)
     (let ((mbx_0 (thread-mailbox thd_0)))
       (if (begin-unsafe (not (queue-start mbx_0)))
-        (internal-error "No Mail!\n")
+        (internal-error "no mail!")
         (queue-remove! mbx_0)))))
 (define is-mail?
   (lambda (thd_0)
@@ -9546,7 +9587,7 @@
                                            (let ((app_0 (* timeout10_0 1000)))
                                              (+
                                               app_0
-                                              (current-inexact-milliseconds)))
+                                              (current-inexact-monotonic-milliseconds)))
                                            #f)))
                                     (letrec*
                                      ((loop_0
@@ -9558,7 +9599,7 @@
                                                   (if timeout10_0
                                                     (<=
                                                      timeout-at_0
-                                                     (current-inexact-milliseconds))
+                                                     (current-inexact-monotonic-milliseconds))
                                                     #f)
                                                   #f)
                                               (begin
@@ -12471,7 +12512,9 @@
                    (current-future$1 #f)
                    (if (zero? (current-atomic))
                      (void)
-                     (internal-error "terminated in atomic mode!"))
+                     (begin
+                       (abort-atomic)
+                       (internal-error "terminated in atomic mode!")))
                    (flush-end-atomic-callbacks!)
                    (thread-dead! t_0)
                    (if (eq? (unsafe-place-local-ref cell.1$1) t_0)
@@ -12676,10 +12719,10 @@
 (define check-place-activity void)
 (define set-check-place-activity!
   (lambda (proc_0) (set! check-place-activity proc_0)))
-(define finish_2685
+(define finish_2553
   (make-struct-type-install-properties
    '(alarm-evt)
-   1
+   2
    0
    #f
    (list
@@ -12688,16 +12731,24 @@
      (poller2.1
       (lambda (e_0 ctx_0)
         (let ((msecs_0 (alarm-evt-msecs e_0)))
-          (if (>= (current-inexact-milliseconds) msecs_0)
-            (values (list e_0) #f)
-            (begin
-              (schedule-info-add-timeout-at!
-               (poll-ctx-sched-info ctx_0)
-               msecs_0)
-              (values #f e_0))))))))
+          (let ((monotonic?_0 (alarm-evt-monotonic e_0)))
+            (let ((current-ms_0
+                   (if monotonic?_0
+                     current-inexact-monotonic-milliseconds
+                     current-inexact-milliseconds)))
+              (if (>= (|#%app| current-ms_0) msecs_0)
+                (values (list e_0) #f)
+                (begin
+                  (schedule-info-add-timeout-at!
+                   (poll-ctx-sched-info ctx_0)
+                   (if monotonic?_0
+                     msecs_0
+                     (let ((app_0 (current-inexact-monotonic-milliseconds)))
+                       (+ app_0 (- msecs_0 (current-inexact-milliseconds))))))
+                  (values #f e_0))))))))))
    (current-inspector)
    #f
-   '(0)
+   '(0 1)
    #f
    'alarm-evt))
 (define struct:alarm-evt
@@ -12707,9 +12758,9 @@
    (|#%nongenerative-uid| alarm-evt)
    #f
    #f
-   1
+   2
    0))
-(define effect_2822 (finish_2685 struct:alarm-evt))
+(define effect_2822 (finish_2553 struct:alarm-evt))
 (define alarm-evt1.1
   (|#%name|
    alarm-evt
@@ -12741,13 +12792,36 @@
          s
          'alarm-evt
          'msecs))))))
+(define alarm-evt-monotonic_2115
+  (|#%name| alarm-evt-monotonic (record-accessor struct:alarm-evt 1)))
+(define alarm-evt-monotonic
+  (|#%name|
+   alarm-evt-monotonic
+   (lambda (s)
+     (if (alarm-evt?_2440 s)
+       (alarm-evt-monotonic_2115 s)
+       ($value
+        (impersonate-ref
+         alarm-evt-monotonic_2115
+         struct:alarm-evt
+         1
+         s
+         'alarm-evt
+         'monotonic))))))
 (define create-alarm-evt
-  (lambda (msecs_0)
-    (begin
-      (if (real? msecs_0)
-        (void)
-        (raise-argument-error 'create-alarm-evt "real?" msecs_0))
-      (alarm-evt1.1 msecs_0))))
+  (let ((create-alarm-evt_0
+         (|#%name|
+          create-alarm-evt
+          (lambda (msecs3_0 monotonic?2_0)
+            (begin
+              (begin
+                (if (real? msecs3_0)
+                  (void)
+                  (raise-argument-error 'create-alarm-evt "real?" msecs3_0))
+                (alarm-evt1.1 msecs3_0 monotonic?2_0)))))))
+    (case-lambda
+     ((msecs_0) (create-alarm-evt_0 msecs_0 #f))
+     ((msecs_0 monotonic?2_0) (create-alarm-evt_0 msecs_0 monotonic?2_0)))))
 (define 1/call-in-nested-thread
   (let ((call-in-nested-thread_0
          (|#%name|

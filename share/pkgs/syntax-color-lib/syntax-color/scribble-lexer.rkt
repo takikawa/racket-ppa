@@ -1,20 +1,40 @@
 #lang racket/base
-(require "scheme-lexer.rkt"
+(require "racket-lexer.rkt"
          racket/contract
          "lexer-contract.rkt"
          racket/port)
 
 (provide 
  (contract-out
-  [scribble-inside-lexer lexer/c]
-  [scribble-lexer lexer/c]
-  [make-scribble-inside-lexer (->* () (#:command-char (and/c char? (not/c (or/c #\] #\[)))) lexer/c)]
-  [make-scribble-lexer (->* () (#:command-char (and/c char? (not/c (or/c #\] #\[)))) lexer/c)]))
+  [scribble-inside-lexer lexer*/c]
+  [scribble-lexer lexer*/c]
+  [make-scribble-inside-lexer (->* () (#:command-char (and/c char? (not/c (or/c #\] #\[)))) lexer*/c)]
+  [make-scribble-lexer (->* () (#:command-char (and/c char? (not/c (or/c #\] #\[)))) lexer*/c)]))
 
-(define-struct text (scheme-rx end-rx sub-rx string-rx open-paren close-paren) #:transparent)
-(define-struct scheme (status backup) #:transparent)
-(define-struct args () #:transparent)
-(define-struct text-args () #:transparent)
+(define-struct text (scheme-rx end-rx sub-rx string-rx open-paren close-paren comment?) #:transparent)
+(define-struct scheme (status backup mode comment?) #:transparent)
+(define-struct args (comment?) #:transparent)
+(define-struct text-args (comment?) #:transparent)
+
+(define (comment-mode? mode)
+  (define l (car mode))
+  (cond
+    [(text? l) (text-comment? l)]
+    [(scheme? l) (scheme-comment? l)]
+    [(args? l) (args-comment? l)]
+    [(text-args? l) (text-args-comment? l)]
+    [else #f]))
+
+(define (maybe-comment type mode)
+  (cond
+    [(comment-mode? mode)
+     (cond
+       [(symbol? type)
+        (hasheq 'type type 'comment? #t)]
+       [else
+        (hash-set type 'comment? #t)])]
+    [else
+     type]))
 
 (define (make-rx:opener #:command-char [at #\@])
   (regexp (format "^[|]([^~aa-zA-Z0-9 \t\r\n\f\\\177-\377{]*){" (regexp-quote (string at)))))
@@ -42,6 +62,7 @@
                 (if (equal? at #\^)
                     #rx".*?(?:(?=[\r\n^])|$)"
                     (regexp (format ".*?(?:(?=[~a\r\n])|$)" at)))
+                #f
                 #f
                 #f)))
   (define (scribble-inside-lexer orig-in offset orig-mode)
@@ -71,7 +92,7 @@
       (define (no-backup mode)
         (if (and (scheme? (car mode))
                  (scheme-backup (car mode)))
-            (cons (make-scheme (scheme-status (car mode)) #f)
+            (cons (struct-copy scheme (car mode) [backup #f])
                   (cdr mode))
             mode))
       (define (maybe-no-backup type mode)
@@ -90,52 +111,52 @@
                ;; Bracketed comment:
                (let-values ([(end-line end-col end-pos) (port-next-location in)])
                  (comment-k (format "~a;" at)
-                            'comment
+                            (maybe-comment 'comment mode)
                             #f
                             pos
                             end-pos
                             (backup-if-needed pos)
-                            (cons (make-text-args)
+                            (cons (make-text-args #t)
                                   (no-backup mode))))
                ;; Line comment:
                (begin
                  (regexp-match? #rx".*?(?=[\r\n])" in)
                  (let-values ([(end-line end-col end-pos) (port-next-location in)])
                    (comment-k (format "~a;" at)
-                              'comment
+                              (maybe-comment 'comment mode)
                               #f
                               pos
                               end-pos
                               (backup-if-needed pos)
                               (no-backup mode)))))]
           [(regexp-try-match rx:opener in)
-           => (lambda (m) (enter-opener m mode))]
+           => (lambda (m) (enter-opener m mode mode))]
           [(regexp-try-match #rx"^{" in)
-           (enter-simple-opener mode)]
+           (enter-simple-opener mode mode)]
           [else
            (let ([new-mode
                   (cond
                     [(equal? #\| (peek-char-or-special in))
                      (read-char in)
-                     (list* (make-scheme 'bar (+ offset pos))
+                     (list* (make-scheme 'bar (+ offset pos) #f (comment-mode? mode))
                             (no-backup mode))]
                     [else
-                     (list* (make-scheme 'one #f)
-                            (make-args)
+                     (list* (make-scheme 'one #f #f (comment-mode? mode))
+                            (make-args (comment-mode? mode))
                             (no-backup mode))])])
              (let-values ([(end-line end-col end-pos) (port-next-location in)])
                (values (string at)
-                       'parenthesis
+                       (maybe-comment 'parenthesis mode)
                        #f
                        pos
                        end-pos
                        (backup-if-needed pos)
                        new-mode)))]))
       
-      (define (enter-simple-opener mode)
+      (define (enter-simple-opener mode c-mode)
         (let-values ([(end-line end-col end-pos) (port-next-location in)])
           (values "{"
-                  'parenthesis
+                  (maybe-comment 'parenthesis c-mode)
                   '|{|
                   pos
                   end-pos
@@ -147,13 +168,14 @@
                                        #rx".*?(?:(?=[{}\r\n^])|$)"
                                        (regexp (format ".*?(?:(?=[~a{}\r\n])|$)" at)))
                                    '|{|
-                                   '|}|)
+                                   '|}|
+                                   (comment-mode? c-mode))
                         (no-backup mode)))))
       
-      (define (enter-opener m mode)
+      (define (enter-opener m mode c-mode)
         (let-values ([(end-line end-col end-pos) (port-next-location in)])
           (values (cadr m)
-                  'parenthesis
+                  (maybe-comment 'parenthesis c-mode)
                   '|{| ;; Better complex paren?
                   pos
                   end-pos
@@ -174,7 +196,8 @@
                                               closer
                                               #")|(?=[\r\n])|$)")
                                      '|{|  ;; Better complex paren?
-                                     '|}|) ;; Better complex paren?
+                                     '|}|  ;; Better complex paren?
+                                     (comment-mode? c-mode))
                           (no-backup mode))))))
       
       (if (eof-object? (peek-char-or-special in))
@@ -196,7 +219,7 @@
                      (regexp-try-match (text-end-rx l) in))
                 (let-values ([(end-line end-col end-pos) (port-next-location in)])
                   (values "}"
-                          'parenthesis
+                          (maybe-comment 'parenthesis mode)
                           (text-close-paren l)
                           pos
                           end-pos
@@ -206,7 +229,7 @@
                      (regexp-try-match (text-sub-rx l) in))
                 (let-values ([(end-line end-col end-pos) (port-next-location in)])
                   (values "{"
-                          'parenthesis
+                          (maybe-comment 'parenthesis mode)
                           (text-open-paren l)
                           pos
                           end-pos
@@ -217,7 +240,7 @@
                 ;; instead of as a string:
                 (let-values ([(end-line end-col end-pos) (port-next-location in)])
                   (values " "
-                          'white-space
+                          (maybe-comment 'white-space mode)
                           #f
                           pos
                           end-pos
@@ -228,7 +251,7 @@
                 (regexp-match? (text-string-rx l) in)
                 (let-values ([(end-line end-col end-pos) (port-next-location in)])
                   (values 'text
-                          'text
+                          (maybe-comment 'text mode)
                           #f
                           pos
                           end-pos
@@ -241,7 +264,7 @@
                        (regexp-try-match #px"^\\s*?[]]" in))
                   (let-values ([(end-line end-col end-pos) (port-next-location in)])
                     (values "]"
-                            'parenthesis
+                            (maybe-comment 'parenthesis mode)
                             '|]|
                             pos
                             end-pos
@@ -251,7 +274,7 @@
                        (regexp-try-match #px"^\\s*?[|]" in))
                   (let-values ([(end-line end-col end-pos) (port-next-location in)])
                     (values "|"
-                            'parenthesis
+                            (maybe-comment 'parenthesis mode)
                             #f
                             pos
                             end-pos
@@ -273,17 +296,17 @@
                  [(and (eq? status 'one)
                        (regexp-try-match rx:opener in))
                   ;; Must have consumed a special before an opener
-                  => (lambda (m) (enter-opener m (cdr mode)))]
+                  => (lambda (m) (enter-opener m (cdr mode) mode))]
                  [(and (eq? status 'one)
                        (regexp-try-match #rx"^{" in))
                   ;; Must have consumed a special before an opener
-                  (enter-simple-opener (cdr mode))]
+                  (enter-simple-opener (cdr mode) mode)]
                  [(and (eq? status 'one)
                        (regexp-try-match #rx"^#?['`]" in))
                   ;; Value special:
                   (let-values ([(end-line end-col end-pos) (port-next-location in)])
                     (values "'"
-                            'constant
+                            (maybe-comment 'constant mode)
                             #f
                             pos
                             end-pos
@@ -294,38 +317,40 @@
                   ;; Other special:
                   (let-values ([(end-line end-col end-pos) (port-next-location in)])
                     (values ","
-                            'other
+                            (maybe-comment 'other mode)
                             #f
                             pos
                             end-pos
                             (backup-if-needed pos)
                             mode))]
                  [else
-                  (let-values ([(lexeme type paren start end adj) 
-                                (case status
-                                  [(bar bar-no-more one) (scheme-nobar-lexer/status in)]
-                                  [else (scheme-lexer/status in)])]
-                               [(consume) (lambda (status)
-                                            (case status
-                                              [(many) mode]
-                                              [(one) (cdr mode)]
-                                              [(bracket bar-no-more) 
-                                               (cons (make-scheme status (scheme-backup l)) 
-                                                     (cdr mode))]
-                                              [(bar) (cons (make-scheme 'bar-no-more (scheme-backup l))
-                                                           (cdr mode))]
-                                              [else (error "bad status" status)]))])
+                  (let*-values ([(lexeme type paren start end backup sub-mode adj)
+                                 (case status
+                                   [(bar bar-no-more one) (racket-nobar-lexer*/status in offset (scheme-mode l))]
+                                   [else (racket-lexer*/status in offset (scheme-mode l))])]
+                                [(l) (struct-copy scheme l [mode sub-mode])]
+                                [(mode) (cons l (cdr mode))]
+                                [(consume) (lambda (status)
+                                             (case status
+                                               [(many) mode]
+                                               [(one) (cdr mode)]
+                                               [(bracket bar-no-more) 
+                                                (cons (struct-copy scheme l [status status])
+                                                      (cdr mode))]
+                                               [(bar) (cons (struct-copy scheme l [status 'bar-no-more])
+                                                            (cdr mode))]
+                                               [else (error "bad status" status)]))])                    
                     (values lexeme
                             (cond
                               [(or (eq? type 'comment) 
                                    (eq? type 'white-space))
                                (if (eq? status 'one)
                                    'error
-                                   type)]
+                                   (maybe-comment type mode))]
                               [(eq? status 'bar-no-more) 
                                ;; Too many S-expressions in @| ... |
                                'error]
-                              [else type])
+                              [else (maybe-comment type mode)])
                             paren 
                             start 
                             end
@@ -339,14 +364,15 @@
                                   [(pair? status) mode]
                                   [else (consume status)])]
                                [(open)
-                                (cons (make-scheme (cons #t status) (scheme-backup l))
+                                (cons (struct-copy scheme l [status (cons #t status)])
                                       (cdr mode))]
                                [(close)
                                 (if (pair? status)
                                     (let ([v (cdr status)])
                                       (if (symbol? v)
                                           (consume v)
-                                          (cons (make-scheme v (scheme-backup l)) (cdr mode))))
+                                          (cons (struct-copy scheme l [status v])
+                                                (cdr mode))))
                                     (consume status))]
                                [(bad) (if (pair? status)
                                           mode
@@ -357,21 +383,22 @@
                [(regexp-try-match #rx"^\\[" in)
                 (let-values ([(end-line end-col end-pos) (port-next-location in)])
                   (values "["
-                          'parenthesis
+                          (maybe-comment 'parenthesis mode)
                           '|[|
                           pos
                           end-pos
                           0
-                          (list* (make-scheme 'bracket #f)
+                          (list* (make-scheme 'bracket #f #f (comment-mode? mode))
                                  mode)))]
                [else
-                (scribble-inside-lexer in offset (cons (make-text-args) (cdr mode)))])]
+                (scribble-inside-lexer in offset (cons (make-text-args (comment-mode? mode))
+                                                       (cdr mode)))])]
             [(text-args? l)
              (cond
                [(regexp-try-match rx:opener in)
-                => (lambda (m) (enter-opener m (cdr mode)))]
+                => (lambda (m) (enter-opener m (cdr mode) mode))]
                [(regexp-try-match #rx"^{" in)
-                (enter-simple-opener (cdr mode))]
+                (enter-simple-opener (cdr mode) mode)]
                [else
                 (scribble-inside-lexer in offset (cdr mode))])]
             [else (error "bad mode")]))))
@@ -382,7 +409,7 @@
 (define (make-scribble-lexer #:command-char [at #\@])
   (define scribble-inside-lexer (make-scribble-inside-lexer #:command-char at))
   (define (scribble-lexer in offset mode)
-    (scribble-inside-lexer in offset (or mode (list (make-scheme 'many #f)))))
+    (scribble-inside-lexer in offset (or mode (list (make-scheme 'many #f #f #f)))))
   scribble-lexer)
 
 (define scribble-lexer (make-scribble-lexer))

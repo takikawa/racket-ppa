@@ -22,6 +22,7 @@ Will not work with the definitions text surrogate interposition that
          racket/match
          racket/port
          syntax-color/racket-lexer
+         syntax-color/lexer-contract
          drracket/syncheck-drracket-button
          (for-syntax racket/base))
 
@@ -41,7 +42,8 @@ Will not work with the definitions text surrogate interposition that
         'drracket:opt-in-toolbar-buttons
         'color-lexer
         'definitions-text-surrogate
-        'drracket:paren-matches))
+        'drracket:paren-matches
+        'drracket:quote-matches))
 
 (provide
  (contract-out
@@ -179,23 +181,51 @@ Will not work with the definitions text surrogate interposition that
                    'call-read-language/inside key default))
   (case key
     [(color-lexer)
+     (define (failing-lexer in)
+       (define-values (_1 _2 pos) (port-next-location in))
+       (define c (read-char in))
+       (cond
+         [(eof-object? c)
+          (values c 'eof #f #f #f)]
+         [else
+          (values (string c)
+                  'error
+                  #f
+                  pos
+                  (+ pos 1))]))
      (cond
        [(procedure-arity-includes? val 3)
-        (λ (port offset mode)
+        (λ (in in-start-pos lexer-mode)
           (call-in-irl-context/abort
            an-irl
            (λ ()
-             (let-values ([(a b c d e) (racket-lexer (open-input-string "\""))])
-               (values a b c d e #f 0)))
+             (define-values (a b c d e) (failing-lexer in))
+             (values a b c d e 0 #f))
            (λ ()
-             (val port offset mode))))]
+             (define-values (_line1 _col1 pos-before) (port-next-location in))
+             (define-values (lexeme type data new-token-start new-token-end
+                                    backup-delta new-lexer-mode/cont)
+               (val in in-start-pos lexer-mode))
+             (define-values (_line2 _col2 pos-after) (port-next-location in))
+             (check-colorer-results-match-port-before-and-after
+              'color:text<%>
+              type pos-before new-token-start new-token-end pos-after)
+             (values lexeme type data new-token-start new-token-end
+                     backup-delta new-lexer-mode/cont))))]
        [else
-        (λ (port)
+        (λ (in)
           (call-in-irl-context/abort
            an-irl
-           (λ () (racket-lexer (open-input-string "\"")))
+           (λ () (failing-lexer in))
            (λ ()
-             (val port))))])]
+             (define-values (_line1 _col1 pos-before) (port-next-location in))
+             (define-values (lexeme type data new-token-start new-token-end)
+               (val in))
+             (define-values (_line2 _col2 pos-after) (port-next-location in))
+             (check-colorer-results-match-port-before-and-after
+              'color:text<%>
+              type pos-before new-token-start new-token-end pos-after)
+             (values lexeme type data new-token-start new-token-end))))])]
     [(drracket:submit-predicate)
      (and val
           (λ (port only-whitespace?)
@@ -235,6 +265,8 @@ Will not work with the definitions text surrogate interposition that
                     (λ () (proc txt evt))))))]
     [(drracket:paren-matches)
      (or val racket:default-paren-matches)]
+    [(drracket:quote-matches)
+     (or val (list #\" #\|))]
     [else
      val]))
   

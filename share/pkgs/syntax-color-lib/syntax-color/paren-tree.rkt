@@ -1,6 +1,6 @@
-(module paren-tree mzscheme
-  (require mzlib/class
-           mzlib/list
+#lang racket/base
+  (require racket/class
+           racket/list
            "token-tree.rkt")
   
   (provide paren-tree%)
@@ -12,27 +12,27 @@
       ;; Symbols for the open-close pairs
       (init matches)
 
-      (define open-matches-table (make-hash-table))
+      (define open-matches-table (make-hasheq))
       (for-each (lambda (x)
-                  (hash-table-put! open-matches-table (car x) (cadr x)))
+                  (hash-set! open-matches-table (car x) (cadr x)))
                 matches)
       
-      (define close-matches-table (make-hash-table))
+      (define close-matches-table (make-hasheq))
       (for-each (lambda (x)
-                  (hash-table-put! close-matches-table (cadr x) (car x)))
+                  (hash-set! close-matches-table (cadr x) (car x)))
                 matches)
       
-      (define back-cache (make-hash-table))
-      (define (reset-cache) (set! back-cache (make-hash-table)))
+      (define back-cache (make-hasheq))
+      (define (reset-cache) (set! back-cache (make-hasheq)))
       
       (define/private (is-open? x)
-        (hash-table-get open-matches-table x #f))
+        (hash-ref open-matches-table x #f))
       
       (define/private (is-close? x)
-        (hash-table-get close-matches-table x #f))
+        (hash-ref close-matches-table x #f))
       
       (define/private (matches? open close)
-        (equal? (hash-table-get open-matches-table open #f)
+        (equal? (hash-ref open-matches-table open #f)
                 close))
 
       ;; The tree and invalid-tree splay trees map ranges of text to paren
@@ -182,7 +182,7 @@
         (define (not-found)
           (send tree search! pos)
           (values (- pos (paren-length (send tree get-root-data))) pos #t))
-        (define already (hash-table-get back-cache pos 'todo))
+        (define already (hash-ref back-cache pos 'todo))
         (cond
           [(not (eq? 'todo already)) (values already pos #f)]
           [else
@@ -204,7 +204,7 @@
                              [prev-start-pos (send tree get-root-start-position)])
                          (cond
                            [(and (is-open? prev-type) (matches? prev-type (paren-type type)))
-                            (hash-table-put! back-cache pos prev-start-pos)
+                            (hash-set! back-cache pos prev-start-pos)
                             (values prev-start-pos pos #f)]
                            [(is-close? prev-type)
                             (let-values ([(new-start new-end new-err)
@@ -323,4 +323,4 @@
           (list (reverse v) (reverse i))))
         
       (super-instantiate ())
-      )))
+      ))

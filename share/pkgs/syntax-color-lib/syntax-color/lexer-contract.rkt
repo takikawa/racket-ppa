@@ -1,7 +1,15 @@
 #lang racket/base
 (require racket/contract/base
          racket/contract/option)
-(provide lexer/c (struct-out dont-stop))
+(provide lexer/c
+         lexer*/c
+         (struct-out dont-stop)
+         (contract-out
+          [check-colorer-results-match-port-before-and-after
+           (-> symbol? any/c
+               (or/c exact-positive-integer? #f) (or/c exact-positive-integer? #f)
+               (or/c exact-positive-integer? #f) (or/c exact-positive-integer? #f)
+               void?)]))
 
 (struct dont-stop (val) #:transparent)
 
@@ -25,6 +33,26 @@
                       [new-mode any/c])))
    #:tester (λ (lexer) (try-some-random-streams lexer))))
 
+(define lexer*/c
+  (option/c
+   (or/c (->i ([in (and/c input-port? port-counts-lines?)])
+              (values [txt any/c]
+                      [type (or/c symbol? (hash/c symbol? any/c #:immutable #t))]
+                      [paren (or/c symbol? #f)]
+                      [start (or/c exact-positive-integer? #f)]
+                      [end (start type) (end/c start type)]))
+         (->i ([in (and/c input-port? port-counts-lines?)]
+               [offset exact-nonnegative-integer?]
+               [mode (not/c dont-stop?)])
+              (values [txt any/c]
+                      [type (or/c symbol? (hash/c symbol? any/c #:immutable #t))]
+                      [paren (or/c symbol? #f)]
+                      [start (or/c exact-positive-integer? #f)]
+                      [end (start type) (end/c start type)]
+                      [backup exact-nonnegative-integer?]
+                      [new-mode any/c])))
+   #:tester (λ (lexer) (try-some-random-streams lexer))))
+
 (define (try-some-random-streams lexer)
   (define 3ary-lexer
     (cond
@@ -39,7 +67,7 @@
   (with-handlers ([exn:fail?
                    (lambda (exn)
                      (raise
-                      (make-exn
+                      (make-exn:fail
                        (format (string-append "try-some-random-streams:"
                                               " random testing of lexer failed\n"
                                               "  lexer: ~e\n"
@@ -113,3 +141,15 @@
             (>/c start))]
     [else
      #f]))
+
+(define (check-colorer-results-match-port-before-and-after
+         who type pos-before new-token-start new-token-end pos-after)
+  (unless (equal? 'eof type)
+    (unless (<= pos-before new-token-start pos-after)
+      (error who
+             "expected the token start to be between ~s and ~s, got ~s"
+             pos-before pos-after new-token-start))
+    (unless (<= pos-before new-token-end pos-after)
+      (error who
+             "expected the token end to be between ~s and ~s, got ~s"
+             pos-before pos-after new-token-end))))

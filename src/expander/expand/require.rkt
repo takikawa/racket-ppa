@@ -42,6 +42,8 @@
                                      #:copy-variable-as-constant? [copy-variable-as-constant? #f]
                                      #:skip-variable-phase-level [skip-variable-phase-level #f]
                                      #:initial-require? [initial-require? #f]
+                                     #:add-defined-portal [add-defined-portal #f]
+                                     #:all-scopes-stx [all-scopes-stx #f]
                                      #:who who)
   (let loop ([reqs reqs]
              [top-req #f]
@@ -53,7 +55,7 @@
              [for-meta-ok? #t]
              [just-meta-ok? #t]
              [layer 'raw])
-    (for/and ([req (in-list reqs)])
+    (for ([req (in-list reqs)])
       (define (check-nested want-layer [ok? #t])
         (unless (and ok? (member want-layer (member layer layers)))
           (raise-syntax-error #f "invalid nesting" orig-s req)))
@@ -122,6 +124,15 @@
                just-space
                adjust
                for-meta-ok? #f 'raw)]
+        [(portal)
+         (check-nested 'raw (eq? just-meta 'all))
+         (define-match m req '(portal id:name stx))
+         (perform-portal-syntax-bind! (m 'id:name) (m 'stx)
+                                      #:phase-shift phase-shift
+                                      #:orig-s orig-s
+                                      #:self self
+                                      #:requires+provides requires+provides
+                                      #:add-defined-portal add-defined-portal)]
         [(for-space)
          (check-nested 'phaseless)
          (define-match m req '(for-space space spec ...))
@@ -210,7 +221,12 @@
          (unless (or (module-path? maybe-mp)
                      (resolved-module-path? maybe-mp))
            (raise-syntax-error #f "bad require spec" orig-s req))
-         (when (or adjust (not (eq? just-meta 'all)))
+         (when (and (requires+provides-all-bindings-simple? requires+provides)
+                    (or adjust
+                        (not (eq? just-meta 'all))
+                        (not (eq? space-level '#:none))
+                        (and all-scopes-stx
+                             (not (same-scopes? req all-scopes-stx)))))
            (set-requires+provides-all-bindings-simple?! requires+provides #f))
          (define mp (if (resolved-module-path? maybe-mp)
                         (resolved-module-path->module-path maybe-mp)
@@ -238,6 +254,11 @@
 (define (ids->sym-set ids)
   (for/set ([id (in-list ids)])
     (syntax-e id)))
+
+(define (same-scopes? a b)
+  ;; chocie of phase 0 is arbitrary:
+  (equal? (syntax-scope-set a 0)
+          (syntax-scope-set b 0)))
 
 ;; ----------------------------------------
 
@@ -283,7 +304,7 @@
    (define bind-in-stx (if (adjust-rename? adjust)
                            (adjust-rename-to-id adjust)
                            in-stx))
-   (define done-syms (and adjust (make-hash)))
+   (define done-syms (and adjust (make-hasheq)))
    (define m (namespace->module m-ns module-name))
    (unless m (raise-unknown-module-error 'require module-name))
    (define interned-mpi
@@ -475,7 +496,7 @@
                                                           #:mpi mpi
                                                           #:provide-phase+space provide-phase+space
                                                           #:phase+space-shift phase+space-shift))
-            (let-values ([(sym) (filter b (provided-as-transformer? binding/p))])
+            (let ([sym (filter b (provided-as-transformer? binding/p))])
               (when (and sym
                          (not can-bulk?)) ;; bulk binding added later
                 ;; Add a non-bulk binding, since `filter` has checked/adjusted it
@@ -560,3 +581,18 @@
                                                     (module-binding-sym binding)
                                                     (module-binding-phase binding))))))
   (namespace-set-variable! m-ns (phase+ phase-shift phase-level) adjusted-sym val as-constant?))
+
+;; ----------------------------------------
+
+(define (perform-portal-syntax-bind! id portal-stx
+                                     #:orig-s orig-s
+                                     #:phase-shift phase-shift
+                                     #:self self
+                                     #:requires+provides requires+provides
+                                     #:add-defined-portal add-defined-portal)
+  (define sym
+    (if add-defined-portal
+        (add-defined-portal id phase-shift portal-stx orig-s)
+        (syntax-e id)))
+  (define binding (make-module-binding (or self top-level-module-path-index) phase-shift sym))
+  (add-binding! id binding phase-shift))

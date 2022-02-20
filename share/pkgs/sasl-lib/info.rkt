@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define version "1.1") (define collection "sasl") (define deps (quote (("base" #:version "6.10")))) (define pkg-authors (quote (ryanc)))))
+(module info setup/infotab (#%module-begin (define version "1.1") (define collection "sasl") (define deps (quote (("base" #:version "6.10")))) (define pkg-authors (quote (ryanc))) (define license (quote (Apache-2.0 OR MIT)))))

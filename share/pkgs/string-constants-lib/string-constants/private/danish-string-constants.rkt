@@ -387,8 +387,6 @@ please adhere to these guidelines:
   (fixup-open-brackets "Korriger automatisk [ -parentereser")
   (fixup-close-parens  "Korriger automatisk afsluttende parenteser")
   (flash-paren-match "Blink ved samhørende parenteser")
-  (auto-save-files "Auto-save filer")
-  (backup-files "Backup filer")
   (map-delete-to-backspace "Bind delete til backspace")
   (verify-exit "Spørg ved nedlukning")
   (ask-before-changing-format "Spørg før ændring af lagringsformat")
@@ -682,7 +680,7 @@ please adhere to these guidelines:
   ;;; autosaving
   (error-autosaving "Fejl under autosaving \"~a\".")
   (autosaving-turned-off "Autosaving er slået fra \nindtil filen filen gemmes.")
-  (recover-autosave-files-frame-title "Gendan backupfiler")
+  ;(recover-autosave-files-frame-title "Gendan backupfiler")
   (autosave-details "Detaljer")
   (autosave-recover "Gendan")
   (autosave-unknown-filename "<<ukendt>>")
@@ -693,15 +691,15 @@ please adhere to these guidelines:
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "Autosave-fil:")
+  ;(autosave-autosave-label: "Autosave-fil:")
   (autosave-original-label: "Original fil:")
-  (autosave-autosave-label "Autosave-fil")
+  ;(autosave-autosave-label "Autosave-fil")
   (autosave-original-label "Original fil")
-  (autosave-compare-files "Sammenlign autosavede filer")
+  ;(autosave-compare-files "Sammenlign autosavede filer")
   
-  (autosave-show-autosave "Autosave-fil") ;; title of a window showing the autosave file
+  ;(autosave-show-autosave "Autosave-fil") ;; title of a window showing the autosave file
   
-  (autosave-explanation "DrRacket fandt autosavede filer, som måske indeholde ugemt arbejde.")
+  ;(autosave-explanation "DrRacket fandt autosavede filer, som måske indeholde ugemt arbejde.")
   
   (autosave-recovered! "Gendannet!") ;; status of an autosave file
   (autosave-deleted "Slettet")       ;; status of an autosave file
@@ -712,7 +710,7 @@ please adhere to these guidelines:
   (autosave-done "Færdig")
   
   ;; appears in the file dialog
-  (autosave-restore-to-where? "Vælg et sted til at gemme autosave-filen.")
+  ;(autosave-restore-to-where? "Vælg et sted til at gemme autosave-filen.")
   
   
   ;;; file modified warning

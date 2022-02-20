@@ -117,7 +117,7 @@
 
 (define MAX-HASH-BURN 128)
 
-(define (equal-hash-loop x burn hc)
+(define (equal-hash-loop x burn hc) ; hc should be 0 or already mixed
   (cond
     [(fx> burn MAX-HASH-BURN) (values hc burn)]
     [(boolean? x) (values (fx+/wraparound hc (if x #x0ace0120 #x0cafe121)) burn)]
@@ -129,15 +129,15 @@
     [(bytevector? x) (values (fx+/wraparound hc (equal-hash x)) burn)]
     [(fxvector? x) (values (fx+/wraparound hc (equal-hash x)) burn)]
     [(flvector? x) (values (fx+/wraparound hc (equal-hash x)) burn)]
-    [(box? x) (equal-hash-loop (unbox x) (fx+ burn 1) (fx+/wraparound hc 1))]
+    [(box? x) (equal-hash-loop (unbox x) (fx+ burn 1) (mix-hash-code (fx+/wraparound hc 1)))]
     [(pair? x)
      (let-values ([(hc0 burn) (equal-hash-loop (car x) (fx+ burn 2) 0)])
-       (let ([hc (fx+/wraparound (mix-hash-code hc) hc0)]
+       (let ([hc (fx+/wraparound hc hc0)]
              [r (cdr x)])
          (if (and (pair? r) (list? r))
              ;; If it continues as a list, don't count cdr direction as burn:
-             (equal-hash-loop r (fx- burn 2) hc)
-             (equal-hash-loop r burn hc))))]
+             (equal-hash-loop r (fx- burn 2) (mix-hash-code hc))
+             (equal-hash-loop r burn (mix-hash-code hc)))))]
     [(vector? x)
      (let ([len (vector-length x)])
        (cond
@@ -162,8 +162,8 @@
          (values hc burn)))]
     [(mpair? x)
      (let-values ([(hc0 burn) (equal-hash-loop (mcar x) (fx+ burn 2) 0)])
-       (let ([hc (fx+/wraparound (mix-hash-code hc) (fx+/wraparound hc0 5))])
-         (equal-hash-loop (mcdr x) burn hc)))]
+       (let ([hc (fx+/wraparound hc (fx+/wraparound hc0 5))])
+         (equal-hash-loop (mcdr x) burn (mix-hash-code hc))))]
     [(and (#%$record? x) (#%$record-hash-procedure x))
      => (lambda (rec-hash)
           (let ([burn (fx+ burn 2)])
@@ -181,7 +181,7 @@
      (equal-hash-loop (impersonator-val x) burn hc)]
     [else (values (fx+/wraparound hc (eq-hash-code x)) burn)]))
 
-(define (equal-secondary-hash-loop x burn hc)
+(define (equal-secondary-hash-loop x burn hc) ; hc should be 0 or already mixed
   (cond
     [(fx> burn MAX-HASH-BURN) (values hc burn)]
     [(boolean? x) (values (fx+/wraparound hc 1) burn)]
@@ -193,11 +193,11 @@
     [(bytevector? x) (values (fx+/wraparound hc (equal-hash x)) burn)]
     [(fxvector? x) (values (fx+/wraparound hc (equal-hash x)) burn)]
     [(flvector? x) (values (fx+/wraparound hc (equal-hash x)) burn)]
-    [(box? x) (equal-secondary-hash-loop (unbox x) (fx+ burn 1) (fx+/wraparound hc 10))]
+    [(box? x) (equal-secondary-hash-loop (unbox x) (fx+ burn 1) (mix-hash-code (fx+/wraparound hc 10)))]
     [(pair? x)
      (let-values ([(hc0 burn) (equal-secondary-hash-loop (car x) (fx+ burn 2) 0)])
-       (let ([hc (fx+/wraparound (mix-hash-code hc) hc0)])
-         (equal-secondary-hash-loop (cdr x) burn hc)))]
+       (let ([hc (fx+/wraparound hc hc0)])
+         (equal-secondary-hash-loop (cdr x) burn (mix-hash-code hc))))]
     [(vector? x)
      (let ([len (vector-length x)])
        (let vec-loop ([i 0] [burn burn] [hc (mix-hash-code hc)])
@@ -219,8 +219,8 @@
          (values hc burn)))]
     [(mpair? x)
      (let-values ([(hc0 burn) (equal-secondary-hash-loop (mcar x) (fx+ burn 2) 0)])
-       (let ([hc (fx+/wraparound (mix-hash-code hc) hc0)])
-         (equal-secondary-hash-loop (mcdr x) burn hc)))]
+       (let ([hc (fx+/wraparound hc hc0)])
+         (equal-secondary-hash-loop (mcdr x) burn (mix-hash-code hc))))]
     [(and (#%$record? x)
           (or (struct-property-ref 'secondary-hash (#%$record-type-descriptor x) #f)
               ;; to use default hash proc as default secondary hash proc:

@@ -4,19 +4,21 @@
          mrlib/bitmap-label
          mrlib/close-icon
          racket/contract
+         racket/contract/option
          racket/place
-         framework
-         framework/private/srcloc-panel
+         racket/format
          racket/unit
          racket/class
          racket/gui/base
+         syntax-color/module-lexer
+         framework
+         framework/private/srcloc-panel
+         framework/private/logging-timer
          drracket/private/drsig
          "local-member-names.rkt"
          "insulated-read-language.rkt"
          "eval-helpers-and-pref-init.rkt"
-         framework/private/logging-timer
-         string-constants
-         racket/format)
+         string-constants)
 
 (define op (current-output-port))
 (define (oprintf . args) (apply fprintf op args))
@@ -27,6 +29,7 @@
           [prefix drracket:language: drracket:language^]
           [prefix drracket:language-configuration: drracket:language-configuration^]
           [prefix drracket:init: drracket:init/int^]
+          [prefix drracket:rep: drracket:rep^]
           [prefix drracket: drracket:interface^])
   (export drracket:module-language-tools/int^)
 
@@ -201,14 +204,102 @@
             (send defs move-to-new-language))))))
   
   (struct hash-lang-error-state (display-msg more-info-msg) #:transparent)
+
+  (define-local-member-name range-indent)
+  (define ml-tools-text<%>
+    (interface ()
+      range-indent))
   
-  (define definitions-text-mixin
+  (define ml-tools-text-mixin
+    (mixin (text:basic<%>) (ml-tools-text<%>)
+      (inherit position-paragraph paragraph-start-position
+               delete insert
+               begin-edit-sequence end-edit-sequence)
+      (define/public (range-indent range-indentation-function start end)
+        (define substs (range-indentation-function this start end))
+        (and substs
+             (let ()
+               (define start-line (position-paragraph start #f))
+               (define end-line (position-paragraph end #t))
+               (begin-edit-sequence)
+               (let loop ([substs substs] [line start-line])
+                 (unless (or (null? substs)
+                             (line . > . end-line))
+                   (define pos (paragraph-start-position line))
+                   (define del-amt (caar substs))
+                   (define insert-str (cadar substs))
+                   (unless (zero? del-amt)
+                     (delete pos (+ pos del-amt)))
+                   (unless (equal? insert-str "")
+                     (insert insert-str pos))
+                   (loop (cdr substs) (add1 line))))
+               (end-edit-sequence))))
+
+      (super-new)))
+
+  (define (interactions-text-mixin t)
+    (only-interactions-text-mixin (ml-tools-text-mixin t)))
+
+  (define only-interactions-text-mixin
+    (mixin (racket:text<%> drracket:rep:text<%> ml-tools-text<%>) ()
+      (inherit get-definitions-text compute-racket-amount-to-indent
+               get-start-position get-end-position
+               range-indent last-position
+               get-surrogate set-surrogate)
+      (define/augment (compute-amount-to-indent pos)
+        (define defs (get-definitions-text))
+        (cond
+          [(send defs get-in-module-language?)
+           (or ((send defs get-indentation-function) this pos)
+               (compute-racket-amount-to-indent pos))]
+          [else
+           (compute-racket-amount-to-indent pos)]))
+
+      (define/override (tabify-selection [start (get-start-position)]
+                                         [end (get-end-position)])
+        (define defs (get-definitions-text))
+        (unless (and (send defs get-in-module-language?)
+                     (range-indent (send defs get-range-indentation-function) start end))
+          (super tabify-selection start end)))
+
+      (define/override (tabify-all)
+        (define defs (get-definitions-text))
+        (unless (and (send defs get-in-module-language?)
+                     (range-indent (send defs get-range-indentation-function)
+                                   0 (last-position)))
+          (super tabify-all)))
+
+      (define/override (reset-console)
+        (when (send (get-definitions-text) get-in-module-language?)
+          (define ints-surrogate (get-surrogate))
+          (when ints-surrogate
+            ;; when ints-surrogate is #f, then we
+            ;; should in a language other than the module
+            ;; language so we can safely skip this
+            (define the-irl (send (get-definitions-text) get-irl))
+            (send ints-surrogate set-get-token
+                  (call-read-language the-irl 'color-lexer (waive-option module-lexer)))
+            (send ints-surrogate set-matches
+                  (call-read-language the-irl
+                                      'drracket:paren-matches
+                                      racket:default-paren-matches))
+            (set-surrogate ints-surrogate)))
+        (super reset-console))
+
+      (super-new)))
+
+  (define (definitions-text-mixin t)
+    (only-definitions-text-mixin (ml-tools-text-mixin t)))
+
+  (define only-definitions-text-mixin
     (mixin (text:basic<%> 
             racket:text<%>
             drracket:unit:definitions-text<%>
-            drracket:module-language:big-defs/ints-label<%>)
+            drracket:module-language:big-defs/ints-label<%>
+            ml-tools-text<%>)
            (drracket:module-language-tools:definitions-text<%>)
       (inherit get-next-settings
+               range-indent
                get-filename
                set-lang-wants-big-defs/ints-labels?
                get-tab
@@ -318,14 +409,13 @@
         (clear-things-out)
 
         (define mode (or (get-definitions-text-surrogate the-irl)
-                         (new racket:text-mode%)))
+                         (new racket:text-mode% [include-paren-keymap? #f])))
         (send mode set-get-token (get-insulated-module-lexer the-irl))
-        (send mode set-matches
-              (call-read-language the-irl
-                                  'drracket:paren-matches
-                                  racket:default-paren-matches))
+        (define paren-matches
+          (call-read-language the-irl 'drracket:paren-matches racket:default-paren-matches))
+        (send mode set-matches paren-matches)
         (set-surrogate mode)
-        
+
         (define lang-wants-big-defs/ints-labels?
           (and (call-read-language the-irl 'drracket:show-big-defs/ints-labels #f)
                #t))
@@ -366,6 +456,11 @@
                 [else name])))
           (send lang-keymap add-function name proc)
           (send lang-keymap map-function key name))
+        (send lang-keymap chain-to-keymap
+              (make-paren-matches-keymap
+               paren-matches
+               (call-read-language the-irl 'drracket:quote-matches (list #\" #\|)))
+              #t)
         (send (get-keymap) chain-to-keymap lang-keymap #t)
 
         (register-new-buttons
@@ -384,6 +479,7 @@
         (define tab (get-tab))
         (define ints (send tab get-ints))
         (set-surrogate (new racket:text-mode%))
+        (send ints set-surrogate (new racket:text-mode%))
         (set-lang-wants-big-defs/ints-labels? #f)
         (send ints set-lang-wants-big-defs/ints-labels? #f)
         (set! extra-default-filters '())
@@ -502,7 +598,9 @@
       (define extra-default-filters '())
       (define default-extension "")
       (define indentation-function (λ (x y) #f))
+      (define/public (get-indentation-function) indentation-function)
       (define range-indentation-function (λ (x y z) #f))
+      (define/public (get-range-indentation-function) range-indentation-function)
       (define grouping-position default-grouping-position)
       (define lang-keymap #f)
       (define/public (with-language-specific-default-extensions-and-filters t)
@@ -520,35 +618,15 @@
           [else
            (compute-racket-amount-to-indent pos)]))
 
-      (define/private (range-indent start end)
-        (define substs (range-indentation-function this start end))
-        (and substs
-             (let ()
-               (define start-line (position-paragraph start #f))
-               (define end-line (position-paragraph end #t))
-               (begin-edit-sequence)
-               (let loop ([substs substs] [line start-line])
-                 (unless (or (null? substs)
-                             (line . > . end-line))
-                   (define pos (paragraph-start-position line))
-                   (define del-amt (caar substs))
-                   (define insert-str (cadar substs))
-                   (unless (zero? del-amt)
-                     (delete pos (+ pos del-amt)))
-                   (unless (equal? insert-str "")
-                     (insert insert-str pos))
-                   (loop (cdr substs) (add1 line))))
-               (end-edit-sequence))))
-
       (define/override (tabify-selection [start (get-start-position)]
                                          [end (get-end-position)])
         (unless (and in-module-language?
-                     (range-indent start end))
+                     (range-indent range-indentation-function start end))
           (super tabify-selection start end)))
 
       (define/override (tabify-all)
         (unless (and in-module-language?
-                     (range-indent 0 (last-position)))
+                     (range-indent range-indentation-function 0 (last-position)))
           (super tabify-all)))
 
       (define/override (find-up-sexp start-pos)
@@ -581,6 +659,38 @@
       (set! in-module-language? 
             (is-a? (drracket:language-configuration:language-settings-language (get-next-settings))
                    drracket:module-language:module-language<%>))))
+
+  (define paren-matches-keymaps (make-hash))
+  (define (make-paren-matches-keymap paren-matches quote-matches)
+    (define keymap-cache-key (cons paren-matches quote-matches))
+    (cond
+      [(hash-ref paren-matches-keymaps keymap-cache-key #f) => car]
+      [else
+       (define keymap (new keymap:aug-keymap%))
+       (define alt-as-meta-keymap (new keymap:aug-keymap%))
+       (for ([paren-match (in-list paren-matches)])
+         (define open-str (symbol->string (list-ref paren-match 0)))
+         (define close-str (symbol->string (list-ref paren-match 1)))
+         (when (and (= 1 (string-length open-str)) (= 1 (string-length close-str)))
+           (racket:map-pairs-keybinding-functions keymap (string-ref open-str 0) (string-ref close-str 0)
+                                                  #:alt-as-meta-keymap alt-as-meta-keymap)))
+       (for ([c (in-list quote-matches)])
+         (racket:map-pairs-keybinding-functions keymap c c))
+       (when (> (hash-count paren-matches-keymaps) 20)
+         (set! paren-matches-keymaps (make-hash)))
+       (hash-set! paren-matches-keymaps keymap-cache-key (list keymap alt-as-meta-keymap))
+       (when (preferences:get 'framework:alt-as-meta)
+         (send keymap chain-to-keymap alt-as-meta-keymap #f))
+       keymap]))
+
+  (define (adjust-alt-as-meta on?)
+    (for ([(_ keymap+alt-as-meta-keymap) (in-hash paren-matches-keymaps)])
+      (define-values (keymap alt-as-meta-keymap) (apply values keymap+alt-as-meta-keymap))
+      (send keymap remove-chained-keymap alt-as-meta-keymap)
+      (when on?
+        (send keymap chain-to-keymap alt-as-meta-keymap #f))))
+  (preferences:add-callback 'framework:alt-as-meta
+                            (λ (p v) (adjust-alt-as-meta v)))
 
   (define default-grouping-position (λ (text start limit dir) #t))
   

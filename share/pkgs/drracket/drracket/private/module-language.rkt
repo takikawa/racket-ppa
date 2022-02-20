@@ -1111,6 +1111,17 @@
                      (define span (vector-ref range 1))
                      (srcloc (get-defs) #f #f pos span))))))
         (send (get-defs) end-edit-sequence))
+
+      (define hide-bottom-bar-after-delay-timer (new timer%
+                                                     [notify-callback
+                                                      (lambda ()
+                                                        (when (and (clean? running-status)
+                                                                   (not (clean-error-messages+locs running-status)))
+                                                          (send (get-defs) hide-module-language-error-panel)))]))
+
+      (define/private (hide-bottom-bar-after-delay)
+        (send hide-bottom-bar-after-delay-timer stop)
+        (send hide-bottom-bar-after-delay-timer start 1000 #t))
       
       (define/private (update-bottom-bar)
         (cond
@@ -1125,7 +1136,9 @@
                (send (get-defs) set-bottom-bar-status 
                      (clean-error-messages+locs running-status)
                      #t #t)
-               (set-bottom-bar-status/blank))]))
+               (begin
+                 (set-bottom-bar-status/blank)
+                 (hide-bottom-bar-after-delay)))]))
       
       (define/private (set-bottom-bar-status/blank)
         (send (get-defs) set-bottom-bar-status
@@ -1826,7 +1839,7 @@
         (cond
           [tooltip-labels-to-show
            (unless tooltip-frame
-             (set! tooltip-frame (new tooltip-frame%)))
+             (set! tooltip-frame (new tooltip-frame% [frame-to-track this])))
            (send tooltip-frame set-tooltip tooltip-labels-to-show)
            (define-values (rx ry) (send running-canvas client->screen 0 0))
            (define-values (cw ch) (send running-canvas get-client-size))

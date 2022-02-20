@@ -610,8 +610,6 @@
   (fixup-open-brackets "Ajuster automatiquement les crochets ouvrants")
   (fixup-close-parens "Ajuster automatiquement les parenthèses fermantes")
   (flash-paren-match "Montrer la parenthèse correspondante.")
-  (auto-save-files "Sauvegarde automatique des fichiers.")
-  (backup-files "Fichiers de sauvegarde.")
   (map-delete-to-backspace "La touche Delete génére Backspace.")
   (verify-exit "Confirmation pour quitter.")
   (ask-before-changing-format "Confirmation avant de changer le format de sauvegarde.")
@@ -1022,7 +1020,7 @@
   ;;; autosaving
   (error-autosaving "Erreur durant l'auto-sauvegarde de « ~a ».")
   (autosaving-turned-off "L'auto-sauvegarde est suspendue\njusqu'à ce que le fichier soit sauvegardé.")
-  (recover-autosave-files-frame-title "Recouvrer des fichiers auto-sauvegardés")
+  ;(recover-autosave-files-frame-title "Recouvrer des fichiers auto-sauvegardés")
   (autosave-details "Détails")
   (autosave-recover "Recouvrer")
   (autosave-unknown-filename "« inconnu »")
@@ -1065,15 +1063,15 @@
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "Fichier auto-sauvegardé :")
+  ;(autosave-autosave-label: "Fichier auto-sauvegardé :")
   (autosave-original-label: "Fichier original :")
-  (autosave-autosave-label "Fichier auto-sauvegardé")
+  ;(autosave-autosave-label "Fichier auto-sauvegardé")
   (autosave-original-label "Fichier original")
-  (autosave-compare-files "Comparer les fichiers auto-sauvegardés")
+  ;(autosave-compare-files "Comparer les fichiers auto-sauvegardés")
 
-  (autosave-show-autosave "Auto-sauvegarder un fichier") ;; title of a window showing the autosave file
+  ;(autosave-show-autosave "Auto-sauvegarder un fichier") ;; title of a window showing the autosave file
 
-  (autosave-explanation "DrRacket a trouvé des fichiers auto-sauvegardés, qui peuvent contenir votre travail non-sauvegardé.")
+  ;(autosave-explanation "DrRacket a trouvé des fichiers auto-sauvegardés, qui peuvent contenir votre travail non-sauvegardé.")
 
   (autosave-recovered! "Recouvré !") ;; status of an autosave file
   (autosave-deleted "Effacé")       ;; status of an autosave file
@@ -1085,7 +1083,7 @@
   (autosave-done "Continuer")
 
   ;; appears in the file dialog
-  (autosave-restore-to-where? "Sélectionnez un répertoire où sauvegarder le fichier auto-sauvegardé.")
+  ;(autosave-restore-to-where? "Sélectionnez un répertoire où sauvegarder le fichier auto-sauvegardé.")
 
   ;;; file modified warning
   (file-has-been-modified

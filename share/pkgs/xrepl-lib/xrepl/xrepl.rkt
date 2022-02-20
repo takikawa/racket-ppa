@@ -14,7 +14,9 @@
 
 ;; ----------------------------------------------------------------------------
 
-(require racket/dict racket/list racket/match scribble/text/wrap)
+(require racket/dict racket/list racket/match scribble/text/wrap
+         racket/file racket/interaction-info
+         (only-in '#%boot default-current-read-interaction?))
 
 ;; ----------------------------------------------------------------------------
 ;; utilities
@@ -231,6 +233,14 @@
   (thread-wait th))
 
 ;; ----------------------------------------------------------------------------
+
+(define current-parse-done-escape (make-parameter void))
+(define current-parse-check-no-more (make-parameter void))
+(define current-command-input (make-parameter (current-input-port)))
+(define current-error-display (make-parameter #f))
+(define current-newline-ends-command (make-parameter #t))
+
+;; ----------------------------------------------------------------------------
 ;; toplevel "," commands management
 
 (struct command (names argline blurb desc handler))
@@ -252,6 +262,11 @@
     (set! commands-dict (dict-update commands-dict
                                      (current-commands-section)
                                      (λ (sec-cmd-list) (cons cmd sec-cmd-list))))))
+;; Every command should get all of its arguments before performing any work,
+;; because we may e speculatively parsing to decide whether the input is
+;; complete (with expeditor). Use `(noarg)` before any work if no arguments
+;; are needed. If multiple calls to `getarg` are needed, supply `#:last? #f`
+;; for all but the last one.
 (define-syntax-rule (defcommand cmd+aliases argline blurb [desc ...]
                       body0 body ...)
   (register-command! `cmd+aliases `argline `blurb `(desc ...)
@@ -275,8 +290,8 @@
 (define (skip-spaces/peek [skip " \t\r"])
   (let ([skip (string->list* skip)])
     (let loop ()
-      (let ([ch (peek-char)])
-        (if (memq ch skip) (begin (read-char) (loop)) ch)))))
+      (let ([ch (peek-char (current-command-input))])
+        (if (memq ch skip) (begin (read-char (current-command-input)) (loop)) ch)))))
 
 (define (here-path [no-path eof])
   (let ([x (here-source)]) (if (path? x) x no-path)))
@@ -289,7 +304,8 @@
              (if (absolute-path? x) `(file ,s) s))]
           [else (error 'here-mod-or-eof "internal error: ~s" x)])))
 
-(define (getarg kind [flag 'req] #:default [dflt #f])
+(define (getarg kind [flag 'req] #:default [dflt #f]
+                #:last? [last? #t])
   (unless (memq flag '(req opt list list+))
     (error 'getarg "unknown flag: ~e" flag))
   (define (argerror fmt . args)
@@ -297,9 +313,9 @@
   (define (missing) (argerror "missing ~a argument" kind))
   (define (get read)
     (define (get-one)
-      (cond [(eq? read read-line-arg) (read)]
-            [(eq? #\newline (skip-spaces/peek)) eof]
-            [else (read)]))
+      (cond [(eq? read read-line-arg) (read (current-command-input))]
+            [(and (current-newline-ends-command) (eq? #\newline (skip-spaces/peek))) eof]
+            [else (read (current-command-input))]))
     (define (get-list)
       (let ([x (get-one)]) (if (eof-object? x) '() (cons x (get-list)))))
     (define 0th  (get-one))
@@ -312,16 +328,19 @@
           [(eq? flag 'opt) #f]
           [(eq? flag 'list) '()]
           [else (missing)]))
-  (define (read-string-arg)
+  (define (read-string-arg in)
     (define ch (skip-spaces/peek " \t\r\n"))
-    (let* ([i (current-input-port)]
+    (let* ([i (current-command-input)]
            [m (if (eq? ch #\")
                 (let ([m (regexp-match #px#"((?:\\\\.|[^\"\\\\]+)+)\"" i)])
                   (and m (regexp-replace* #rx#"\\\\(.)" (cadr m) #"\\1")))
                 (cond [(regexp-match #px#"\\S+" i) => car] [else #f]))])
       (if m (bytes->string/locale m) eof)))
-  (define (read-line-arg)
-    (regexp-replace* #px"^\\s+|\\s+$" (read-line) ""))
+  (define (read-line-arg in)
+    (define l (read-line in))
+    (if (eof-object? l)
+        ""
+        (regexp-replace* #px"^\\s+|\\s+$" l "")))
   (define (symbolic-shorthand x)
     ;; convenience: symbolic requires that name a file turn to a `file'
     ;; require, and those that name a known module turn to a (quote sym)
@@ -340,29 +359,45 @@
     ;; no verification of requires -- let the usual error happen if needed
     (symbolic-shorthand req))
   (define (process-module mod)
-    (or (known-module (symbolic-shorthand mod))
-        (cmderror "unknown module: ~s" mod)))
+    (if (eq? (current-parse-done-escape) void)
+        (or (known-module (symbolic-shorthand mod))
+            (cmderror "unknown module: ~s" mod))
+        mod))
   (define (translate arg convert)
     (and arg (if (memq flag '(list list+)) (map convert arg) (convert arg))))
-  (let loop ([kind kind])
-    (case kind
-      [(line)    (get read-line-arg)]
-      [(string)  (get read-string-arg)]
-      [(path)    (translate (loop 'string) expand-user-path)]
-      [(sexpr)   (get read)]
-      [(syntax)  (translate (get read-syntax) namespace-syntax-introduce)]
-      [(require) (translate (loop 'syntax) process-require)]
-      [(module)  (translate (loop 'sexpr) process-module)]
-      [else (error 'getarg "unknown arg kind: ~e" kind)])))
+  (begin0
+    (let loop ([kind kind])
+      (case kind
+        [(line)    (get read-line-arg)]
+        [(string)  (get read-string-arg)]
+        [(path)    (translate (loop 'string) expand-user-path)]
+        [(sexpr)   (get read)]
+        [(syntax)  (translate (get (lambda (in) (read-syntax (object-name in) in)))
+                              namespace-syntax-introduce)]
+        [(require) (translate (loop 'syntax) process-require)]
+        [(module)  (translate (loop 'sexpr) process-module)]
+        [else (error 'getarg "unknown arg kind: ~e" kind)]))
+    (when last?
+      ((current-parse-done-escape))
+      ((current-parse-check-no-more)))))
 
-(define (run-command cmd)
+(define (noarg)
+  ((current-parse-done-escape))
+  ((current-parse-check-no-more)))
+
+(define (run-command cmd #:handle-exn? [handle-exn? #f])
   (parameterize ([current-command cmd])
-    (with-handlers ([void (λ (e)
-                            (if (exn? e)
-                              (eprintf "~a\n" (exn-message e))
-                              (eprintf "~s\n" e)))])
+    (with-handlers ([(if handle-exn? void (lambda (exn) #f))
+                     (λ (e)
+                       (if (exn? e)
+                           (eprintf "~a\n" (exn-message e))
+                           (eprintf "~s\n" e)))])
       ((command-handler (or (hash-ref commands cmd #f)
-                            (error "Unknown command:" cmd)))))))
+                            (begin
+                              ;; by escaping here, we let the unknown command through
+                              ;; so that an error is reported
+                              ((current-parse-done-escape))
+                              (error "Unknown command:" cmd))))))))
 
 ;; ----------------------------------------------------------------------------
 ;; generic commands
@@ -435,6 +470,7 @@
 (defcommand pwd #f
   "display the current directory"
   ["Displays the value of `current-directory'."]
+  (noarg)
   (report-directory-change 'pwd))
 
 (defcommand (shell sh ls cp mv rm md rd git svn) "<shell-command>"
@@ -467,6 +503,7 @@
   ["Runs your $EDITOR with the specified file/s.  If no files are given, and"
    "the REPL is currently inside a module, the file for that module is used."
    "If $EDITOR is not set, the ,drracket will be used instead."]
+  (define arg (getarg 'path 'list #:default here-path))
   (define env (let ([e (getenv "EDITOR")]) (and (not (equal? "" e)) e)))
   (define exe (and env (find-executable-path env)))
   (cond [(not env)
@@ -475,8 +512,7 @@
                    (string-append "$EDITOR ("env") not found in your path")
                    "no $EDITOR variable"))
          (run-command 'drracket)]
-        [(not (let ([arg (getarg 'path 'list #:default here-path)])
-                    (parameterize ([current-input-port original-input-port]) (apply system* exe arg))))
+        [(not (parameterize ([current-input-port original-input-port]) (apply system* exe arg)))
          (eprintf "; (exit with an error status)\n")]
         [else (void)]))
 
@@ -827,13 +863,14 @@
    "is used with that module, causing it to reload if needed.  (Note that this"
    "can be used even in languages that don't have the `enter!' binding.)"]
   (eval-sexpr-for-user `(,(enter!-id)
-                         ,(getarg 'module #:default here-mod-or-eof)
+                         ,(getarg 'module #:default here-mod-or-eof #:last? #f)
                          ,@(getarg 'syntax 'list)
                          #:dont-re-require-enter)))
 
 (defcommand (toplevel top) #f
   "go back to the toplevel"
   ["Go back to the toplevel, same as ,enter with no arguments."]
+  (noarg)
   (eval-sexpr-for-user `(,(enter!-id) #f)))
 
 (defcommand (load ld) "<filename> ..."
@@ -860,9 +897,14 @@
 (defcommand (backtrace bt) #f
   "see a backtrace of the last exception"
   ["Display the last exception with its backtrace."]
-  (printf "; ~a\n"
-          (regexp-replace* #rx"\n+" (or last-backtrace "(no backtrace)")
-                           "\n; ")))
+  (noarg)
+  (if (current-error-display)
+      ((current-error-display) (string-append
+                                (or last-backtrace "(no backtrace)")
+                                "\n"))
+      (printf "; ~a\n"
+              (regexp-replace* #rx"\n+" (or last-backtrace "(no backtrace)")
+                               "\n; "))))
 
 (defcommand (exn) "[id]"
   "see the previous exception"
@@ -1074,6 +1116,43 @@
                         (string-set! line i #\^))))
                   (displayln (regexp-replace #rx" +$" line "")))
                 (loop)))))))))
+
+;; ----------------------------------------------------------------------------
+;; configuration
+
+(defcommand-section "Configuration")
+
+(defcommand input "expeditor | readline | plain | default"
+  "configure the input mode for next startup"
+  ["Configures the input mode that xrepl uses on startup The options"
+   "are"
+   " * expeditor : supports language-specific navigation and indentation"
+   "               where the expression stream is separate from the"
+   "               current input port"
+   " * readline  : traditional line-editor input, where the line editor"
+   "               feeds into the current input port; uses the editline"
+   "               library by default, but install the \"readline-gpl\""
+   "                package to use the readline library"
+   " * plain     : reads from the current input port"
+   " * default   : tries the above in order"
+   "Plain mode is used if the selected mode is not available in the"
+   "current installation."]
+  (define mode (getarg 'sexpr))
+  (unless (memq mode '(expeditor readline plain default))
+    (error 'xrepl "not a regonized input mode: ~e" mode))
+  (put-preferences '(xrepl-input-mode) (list (if (eq? mode 'default) #f mode))))
+
+(define current-expeditor-color-enabled void)
+
+(defcommand color "on | off | yes | no | #true | #false"
+  "configure expeditor color mode"
+  ["Enables or disables color mode for expeditor."]
+  (define mode (getarg 'sexpr))
+  (unless (memq mode '(on off yes no #t #f))
+    (error 'xrepl "not a regonized color mode: ~e" mode))
+  (define on? (memq mode '(on yes #t)))
+  (put-preferences '(expeditor-color-enabled) (list on?))
+  (current-expeditor-color-enabled on?))
 
 ;; ----------------------------------------------------------------------------
 ;; namespace switching
@@ -1375,6 +1454,7 @@
    "carefully: I will tell you about the change, and ask for permission."
    "You can then edit the file if you want to; in your system, you can find it"
    ,(format "at \"~a\"." init-file)]
+  (noarg)
   (define comment "The following line loads `xrepl' support")
   (define expr  "(require xrepl)")
   (define dexpr "(dynamic-require 'xrepl #f)")
@@ -1539,66 +1619,212 @@
         #:constructor-name more-inputs* #:omit-define-syntaxes)
 (define (more-inputs . inputs) (more-inputs* inputs))
 
+(struct xrepl-command-and-argument-port (cmd in) #:transparent)
+
 (define (make-xrepl-reader orig)
   (define (plain-reader prefix) ; a plain reader, without readline
     (display prefix) (display "> ") (flush-output) (zero-column!)
     (let ([in ((current-get-interaction-input-port))])
       ((current-read-interaction) (object-name in) in)))
+  (define input-mode (get-preference 'xrepl-input-mode (lambda () #f)))
+  (define expeditor-open ; no direct dependency on expeditor
+    (and (or (eq? input-mode 'expeditor)
+             (not input-mode))
+         (or (current-interaction-info)
+             (default-current-read-interaction?))
+         (with-handlers ([exn? (λ (_) #f)])
+           (collection-file-path "main.rkt" "expeditor"))
+         (dynamic-require 'expeditor 'expeditor-open (lambda () #f))))
   (define RL ; no direct dependency on readline
-    (with-handlers ([exn? (λ (_) #f)])
-      (collection-file-path "pread.rkt" "readline")))
+    (and (or (eq? input-mode 'readline)
+             (not input-mode))
+         (with-handlers ([exn? (λ (_) #f)])
+           (collection-file-path "pread.rkt" "readline"))))
   (define (make-readline-reader)
     (let ([p (dynamic-require RL 'current-prompt)]
           [r (dynamic-require RL 'read-cmdline-syntax)])
       (λ (prefix) ; uses the readline prompt
         (parameterize ([p (bytes-append (string->bytes/locale prefix) (p))])
           (r)))))
-  (define reader
-    (case (object-name (current-input-port))
-      [(stdin)
-       (if (or (not (terminal-port? (current-input-port)))
-               (eq? 'windows (system-type))
-               (regexp-match? #rx"^dumb" (or (getenv "TERM") ""))
-               (not RL))
-         plain-reader
-         (with-handlers ([exn?
-                          (λ (e)
-                            (eprintf "; Warning: no readline support (~a)\n"
-                                     (exn-message e))
-                            plain-reader)])
-           (dynamic-require 'readline/rep-start #f)
-           ;; requiring readline should have changed the reader
-           (if (eq? (current-prompt-read)
-                    (dynamic-require RL 'read-cmdline-syntax))
-             (make-readline-reader)
-             (begin (eprintf "; Warning: could not initialize readline\n")
-                    plain-reader))))]
-      [(readline-input)
-       (eprintf "; Note: readline already loaded\n~a\n"
-                ";   (better to let xrepl load it for you)")
-       (make-readline-reader)]
-      [else plain-reader]))
+  ;; for readline or plain input, the xrepl command stream is just the
+  ;; current input stream;
+  ;; when using expeditor, expression and command input is from a different
+  ;; stream than just reading `(current-input-port)`; we adapt by having the
+  ;; reader decde whether it's looking at an xrepl command, and if so, provide
+  ;; an input port to read the rest of the command --- and in that case, we
+  ;; need to try to parse a command without running it to decide whether
+  ;; input is ready, and that's why the `current-parse-done-escape` parameter
+  ;; exists
+  (define-values (command-from-input? reader)
+    (cond
+      [(and expeditor-open
+            (expeditor-open
+             (map bytes->string/utf-8
+                  (get-preference 'readline-input-history (lambda () null)))))
+       => (lambda (ee)
+            (define (ex sym) (dynamic-require 'expeditor sym))
+            (define expeditor-read (ex 'expeditor-read))
+            (define expeditor-close (ex 'expeditor-close))
+            (define current-expeditor-ready-checker (ex 'current-expeditor-ready-checker))
+            (set! current-expeditor-color-enabled (ex 'current-expeditor-color-enabled))
+            (current-error-display (let ([error-display (ex 'expeditor-error-display)]
+                                         [orig-stderr (current-error-port)])
+                                     (lambda (s)
+                                       (define stderr (current-error-port))
+                                       (cond
+                                         [(equal? orig-stderr stderr)
+                                          (error-display s)]
+                                         [else
+                                          (display s stderr)]))))
+            (current-newline-ends-command #f)
+            ((ex 'expeditor-configure))
+            (define (save-history)
+              (define history (expeditor-close ee))
+              (put-preferences '(readline-input-history) (list (map string->bytes/utf-8 history))))
+            (exit-handler
+             (let ([old (exit-handler)])
+               (lambda (v)
+                 (save-history)
+                 (old v))))
+            (values
+             #f ; commands no from input
+             ;; reader:
+             (lambda (prefix)
+               (parameterize ([current-read-interaction
+                               ;; wrap the reader to check for an xrepl command (which might
+                               ;; use a different syntax than the current language) and to
+                               ;; consume all input:
+                               (let ([orig (current-read-interaction)])
+                                 (lambda (name in)
+                                   (cond
+                                     [(xrepl-command-input? in)
+                                      (extract-cmd
+                                       (read in)
+                                       (lambda (cmd)
+                                         (define-values (i o) (make-pipe))
+                                         (let loop ()
+                                           (define bstr (read-bytes 4096 in))
+                                           (unless (eof-object? bstr)
+                                             (write-bytes bstr o)
+                                             (loop)))
+                                         (close-output-port o)
+                                         (xrepl-command-and-argument-port cmd i)))]
+                                     [(eof-object? (peek-byte in))
+                                      (save-history)
+                                      eof]
+                                     [else
+                                      (let loop ()
+                                        (define v (orig name in))
+                                        (cond
+                                          [(eof-object? v) null]
+                                          [else
+                                           (cons v (loop))]))])))]
+                              [current-expeditor-ready-checker
+                               (let ([orig (current-expeditor-ready-checker)])
+                                 (lambda (in)
+                                   (cond
+                                     [(xrepl-command-input? in)
+                                      (with-handlers ([exn:fail? (lambda (exn) #f)])
+                                        (extract-cmd
+                                         (read in)
+                                         (lambda (cmd)
+                                           (let/ec escape
+                                             (parameterize ([current-parse-done-escape escape]
+                                                            [current-command-input in])
+                                               (run-command cmd #:handle-exn? #f)))
+                                           #t)))]
+                                     [else (orig in)])))])
+                 (define v (expeditor-read ee))
+                 (cond
+                   [(eof-object? v) v]
+                   [(xrepl-command-and-argument-port? v) v]
+                   [(and (pair? v) (null? (cdr v))) (car v)]
+                   [else (more-inputs* v)])))))]
+      [else
+       (values
+        #t ;; commands are from input
+        ;; reader:
+        (case (and (not (eq? input-mode 'plain))
+                   (object-name (current-input-port)))
+          [(stdin)
+           (if (or (not (terminal-port? (current-input-port)))
+                   (eq? 'windows (system-type))
+                   (regexp-match? #rx"^dumb" (or (getenv "TERM") ""))
+                   (not RL))
+               plain-reader
+               (with-handlers ([exn?
+                                (λ (e)
+                                  (eprintf "; Warning: no readline support (~a)\n"
+                                           (exn-message e))
+                                  plain-reader)])
+                 (dynamic-require 'readline/rep-start #f)
+                 ;; requiring readline should have changed the reader
+                 (if (eq? (current-prompt-read)
+                          (dynamic-require RL 'read-cmdline-syntax))
+                     (make-readline-reader)
+                     (begin (eprintf "; Warning: could not initialize readline\n")
+                            plain-reader))))]
+          [(readline-input)
+           (eprintf "; Note: readline already loaded\n~a\n"
+                    ";   (better to let xrepl load it for you)")
+           (make-readline-reader)]
+          [else plain-reader]))]))
   ;; IO management
   (port-count-lines! (current-input-port))
   ;; wrap the reader to get the command functionality
-  (define more-inputs '())
+  (define pending-inputs '())
   (define (reader-loop)
     (parameterize ([saved-values #f])
-      (define from-queue? (pair? more-inputs))
+      (define from-queue? (pair? pending-inputs))
       (define input
         (if from-queue?
-          (begin0 (car more-inputs) (set! more-inputs (cdr more-inputs)))
+          (begin0 (car pending-inputs) (set! pending-inputs (cdr pending-inputs)))
           (begin (fresh-line) (reader (get-prefix)))))
-      (syntax-case input ()
-        [(uq cmd) (eq? 'unquote (syntax-e #'uq))
-         (let ([r (run-command (syntax->datum #'cmd))])
-           (cond [(void? r) (reader-loop)]
-                 [(more-inputs? r)
-                  (set! more-inputs (append (more-inputs-list r) more-inputs))
-                  (reader-loop)]
-                 [else (eprintf "; Warning: internal weirdness: ~s\n" r) r]))]
-        [_ (begin (unless from-queue? (last-input-syntax input)) input)])))
+      (define (finish-command r)
+        (cond
+          [(void? r) (reader-loop)]
+          [(more-inputs? r)
+           (set! pending-inputs (append (more-inputs-list r) pending-inputs))
+           (reader-loop)]
+          [else (eprintf "; Warning: internal weirdness: ~s\n" r) r]))
+      (cond
+        [(more-inputs? input)
+         (set! pending-inputs (append (more-inputs-list input) pending-inputs))
+         (reader-loop)]
+        [(xrepl-command-and-argument-port? input)
+         (finish-command
+          (parameterize ([current-command-input (xrepl-command-and-argument-port-in input)]
+                         [current-parse-done-escape (lambda ()
+                                                      (skip-spaces/peek)
+                                                      (define s (read-string 32 (current-command-input)))
+                                                      (unless (eof-object? s)
+                                                        (error 'xrepl "unexpected command argument at: ~.a" s)))])
+            (run-command (xrepl-command-and-argument-port-cmd input))))]
+        [else
+         (extract-cmd
+          (and command-from-input? input)
+          (lambda (cmd)
+            (cond
+              [cmd
+               (finish-command (parameterize ([current-command-input (current-input-port)])
+                                 (run-command cmd)))]
+              [else
+               (unless from-queue? (last-input-syntax input))
+               input])))])))
   reader-loop)
+
+(define (xrepl-command-input? in)
+  (regexp-match-peek #px"^\\s*," in))
+
+(define (extract-cmd v-in k)
+  (define v (if (syntax? v-in) (syntax->datum v-in) v-in))
+  (cond
+    [(and (pair? v)
+          (eq? 'unquote (car v))
+          (pair? (cdr v))
+          (null? (cddr v)))
+     (k (cadr v))]
+    [else (k #f)]))
 
 ;; ----------------------------------------------------------------------------
 ;; a display handler that omits stacktraces (making them available later)
@@ -1613,23 +1839,32 @@
              [s (if (equal? str s)
                     (string-append s "\n(no backtrace)")
                     s)])
-        ;; temporary hack: this is always on since it shows all fields,
+        ;; this is always on since it shows all fields,
         ;; so ",bt" is now really a generic "more info"
-        (and ; (not (equal? str s))
-         (begin (set! last-backtrace s)
-                (set! last-exn exn)
-                #t)))))
+        (begin (set! last-backtrace s)
+               (set! last-exn exn)
+               #t))))
   (define msg "[,bt for context]")
   (parameterize ([current-output-port (current-error-port)])
     (let* ([s (regexp-replace* #rx"^\n+|\n+$" str "")]
            [s (regexp-replace* #rx"\n\n+" s "\n")]
            [s (regexp-replace* #rx"\n  [^\n]+\\.\\.\\.:(?:[^\n]+|\n   )+" s "")]
-           [s (regexp-replace* #rx"\n" s "\n; ")]
+           [s (if (current-error-display)
+                  s
+                  (regexp-replace* #rx"\n" s "\n; "))]
            [s (if backtrace?
-                (string-append s (if (regexp-match? #rx"\n" s) "\n; " " ") msg)
-                s)])
+                  (string-append s
+                                 (if (regexp-match? #rx"\n" s)
+                                     (if (current-error-display)
+                                         "\n "
+                                         "\n; ")
+                                     " ")
+                                 msg)
+                  s)])
       (fresh-line #t)
-      (with-wrapped-output (printf "; ~a\n" s)))))
+      (if (current-error-display)
+          ((current-error-display) (string-append s "\n"))
+          (with-wrapped-output (printf "; ~a\n" s))))))
 
 ;; ----------------------------------------------------------------------------
 ;; set up the xrepl environment
