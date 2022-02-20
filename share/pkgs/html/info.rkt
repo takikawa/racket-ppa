@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("html-lib" "html-doc"))) (define implies (quote ("html-lib" "html-doc"))) (define pkg-desc "HTML parsing and generation") (define pkg-authors (quote (jay mflatt)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("html-lib" "html-doc"))) (define implies (quote ("html-lib" "html-doc"))) (define pkg-desc "HTML parsing and generation") (define pkg-authors (quote (jay mflatt))) (define license (quote (Apache-2.0 OR MIT)))))

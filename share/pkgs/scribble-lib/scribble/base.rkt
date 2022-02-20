@@ -17,6 +17,9 @@
 
 ;; ----------------------------------------
 
+(module configure-runtime racket/base
+  (require scribble/base/lang/configure-runtime))
+
 (define-syntax-rule (title-like-contract)
   (->* ()
        (#:tag (or/c #f string? (listof string?))
@@ -568,13 +571,13 @@
                 #:link-render-style (or/c #f link-render-style?))
                element?)]
   [Secref (->* (string?)
-               (#:doc module-path?
+               (#:doc (or/c #f module-path?)
                 #:tag-prefixes (or/c #f (listof string?))
                 #:underline? any/c
                 #:link-render-style (or/c #f link-render-style?))
                element?)]
   [seclink (->* (string?)
-                (#:doc module-path?
+                (#:doc (or/c #f module-path?)
                  #:tag-prefixes (or/c #f (listof string?))
                  #:underline? any/c
                  #:indirect? any/c)

@@ -92,39 +92,25 @@
  (define (names-imported-in-with-depths body form-name stx-for-error)
    (names-imported-in/rec body 0))
 
-
- (define (dedupe-names-and-depths lst form-name stx-for-error)
-  (remove-duplicates
-   lst
-   (match-lambda*
-    [`((,id-a ,depth-a) (,id-b ,depth-b))
-     (if (equal? id-a id-b)
-         (if (= depth-a depth-b)
-             #t
-             (raise-syntax-error
-              (syntax-e form-name)
-              (format "same name used at two different ... depths: ~s (depth ~s) vs. ~s (depth ~s)"
-                      id-a depth-a id-b depth-b)
-              stx-for-error))
-         #f)])))
-
  ;; this returns both the names and the `...` depth at which they were transcribed
- (define (names-transcribed-in-body/rec body depth)
-   (match body
-     [(import/internal sub-body beta)
-      (names-transcribed-in-body/rec sub-body depth)]
-     [(.../internal sub-body _)
-      (names-transcribed-in-body/rec sub-body (+ depth 1))]
-     [(...bind/internal export-name _ _) `((,export-name ,depth))]
-     [`(,car-body . ,cdr-body)
-      (append (names-transcribed-in-body/rec car-body depth)
-              (names-transcribed-in-body/rec cdr-body depth))]
-     [anything-else (if (symbol? anything-else)
-                        `((,anything-else ,depth))
-                        `())]))
-
  (define (names-transcribed-in-body body form-name stx-for-error)
-   (dedupe-names-and-depths (names-transcribed-in-body/rec body 0) form-name stx-for-error))
+   (define names-to-depths (make-hash))
+   (let loop ([body body] [depth 0])
+     (define (add-name s) (hash-set! names-to-depths s depth))
+     (match body
+       [(import/internal sub-body beta)
+        (loop sub-body depth)]
+       [(.../internal sub-body _)
+        (loop sub-body (+ depth 1))]
+       [(...bind/internal export-name _ _)
+        (add-name export-name)]
+       [(cons car-body cdr-body)
+        (loop car-body depth)
+        (loop cdr-body depth)]
+       [(? symbol? s)
+        (add-name s)]
+       [_ (void)]))
+   (sort (hash-map names-to-depths list) symbol<? #:key car))
 
  (module+ test
    (require rackunit)
@@ -365,7 +351,7 @@
    (check-equal?
     lambda-bspec
     (bspec `(lambda (x) ,(import/internal 'expr 'x))
-           (shadow/internal `()) '(x) '() '(x) `((lambda 0) (x 0) (expr 0))))
+           (shadow/internal `()) '(x) '() '(x) `((expr 0) (lambda 0) (x 0))))
 
    (check-equal?
     (surface-bspec->bspec
@@ -375,7 +361,7 @@
                         `(c ,(import/internal `d `h) e)
                         (shadow/internal `(e b ,(shadow/internal `(,(shadow/internal `())))))) e f g h)
            (shadow/internal `(e f)) `(h e b) `(e f) `(h e b f)
-           `((form 0) (a 0) (b 0) (c 0) (d 0) (e 0) (f 0) (g 0) (h 0))))
+           `((a 0) (b 0) (c 0) (d 0) (e 0) (f 0) (form 0) (g 0) (h 0))))
 
    (check-equal?
     (surface-bspec->bspec #'((form x_11
@@ -392,7 +378,7 @@
            `(x_2 x_444 x_1 x_9 x_3)
            `()
            `(x_2 x_444 x_1 x_9 x_3)
-           (map (λ (nm) `(,nm 0)) `(form x_11 x_1 x_2 x_444 x_9 x_3 e_1 x_22 x_33 e_2 e_3))))
+           (map (λ (nm) `(,nm 0)) `(e_1 e_2 e_3 form x_1 x_11 x_2 x_22 x_3 x_33 x_444 x_9))))
 
 
 
@@ -405,7 +391,7 @@
     (bspec `(va-lambda (,(.../internal `x `(x)))
                        ,(import/internal `expr (shadow/internal `(,(.../internal `x `(x))))))
            (shadow/internal `()) `(x) `() `(x)
-           `((va-lambda 0) (x 1) (expr 0))))
+           `((expr 0) (va-lambda 0) (x 1))))
 
 
    ;; imported, exported, imported and exported

@@ -42,6 +42,7 @@
 	 contract ; legacy
 	 one-of ; deprecated
 	 -> mixed predicate enum combined list-of nonempty-list-of)
+(provide (rename-out (nonempty-list-of cons-list-of)))
 
 (provide number real rational integer integer-from-to natural
 	 boolean true false
@@ -1122,7 +1123,7 @@
 
 (define-syntax (for-all stx)
   (syntax-case stx ()
-    ((_ (?clause ...) ?body)
+    ((_ (?clause ...) ?body0 ?body ...)
      (with-syntax ((((?id ?arb) ...)
 		    (map (lambda (pr)
 			   (syntax-case pr ()
@@ -1134,20 +1135,20 @@
 				   (or (signature-arbitrary (signature ?signature))
 				       ?error-call))))
 			     (_
-			      (raise-sdp-syntax-error #f "inkorrekte `for-all'-Klausel - sollte die Form (id contr) haben"
+			      (raise-sdp-syntax-error #f "inkorrekte `for-all'-Klausel - sollte die Form (id signature) haben"
 						      pr))))
 			 (syntax->list #'(?clause ...)))))
 
        (stepper-syntax-property #'(quickcheck:property 
-				   ((?id ?arb) ...) ?body)
+				   ((?id ?arb) ...) ?body0 ?body ...)
 				'stepper-skip-completely
 				#t)))
-    ((_ ?something ?body)
+    ((_ ?something ?body0 ?body ...)
      (raise-sdp-syntax-error #f "keine Klauseln der Form (id contr)"
 			     stx))
-    ((_ ?thing1 ?thing2 ?thing3 ?things ...)
-     (raise-sdp-syntax-error #f "zuviele Operanden"
-			     stx))))
+    ((_ ?something)
+     (raise-sdp-syntax-error #f "Rumpf fehlt" stx))))
+
 
 (define-syntax (check-property stx)
   (unless (memq (syntax-local-context) '(module top-level))
@@ -1163,6 +1164,13 @@
     (_ (raise-sdp-syntax-error #f "`check-property' erwartet einen einzelnen Operanden"
 			       stx))))
 
+(define quickcheck-config
+  (make-config 100
+               2000
+               (lambda (n)
+                 (+ 3 (* n 2)))
+               values))
+
 (define (check-property-error test srcloc)
   (with-handlers ((exn:fail?
                    (lambda (e)
@@ -1175,13 +1183,13 @@
              (lambda (e)
                ;; minor kludge to produce comprehensible error message
                (if (eq? (exn:assertion-violation-who e) 'coerce->result-generator)
-                   (raise (make-exn:fail (string-append "Wert muß Eigenschaft oder boolesch sein: "
+                   (raise (make-exn:fail (string-append "Wert muss Eigenschaft oder boolesch sein: "
                                                         ((error-value->string-handler)
                                                          (car (exn:assertion-violation-irritants e))
                                                          100))
                                          (exn-continuation-marks e)))
                    (raise e)))))
-         (quickcheck-results (test))))
+         (check-results quickcheck-config (test))))
      (lambda (ntest stamps result)
        (if (check-result? result)
            (begin
@@ -1339,7 +1347,7 @@
 		    (selectors (reverse rev-selectors))
 		    (field-ids (generate-temporaries pats)))
 	       (unless (= (length rev-selectors) (length pats))
-		 (raise-sdp-syntax-error #f "Die Anzahl der Felder im match stimmt nicht" stx))
+		 (raise-sdp-syntax-error #f "Die Anzahl der Felder im match stimmt nicht" #'?pattern0))
 	       #`(if (#,pred ?id)
 		     #,(let recur ((pats pats)
 				   (selectors selectors)

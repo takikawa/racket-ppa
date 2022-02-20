@@ -435,7 +435,8 @@
          (plai-syntax-error 'type-case stx type-case:unreachable-else))
 
 
-       #`(let ([expr test-expr])
+       (quasisyntax/loc stx
+         (let ([expr test-expr])
            (if (not (#,type? expr))
              #,(syntax/loc #'test-expr
                  (error 'type-case "expected a value from type ~a, got: ~a"
@@ -446,7 +447,7 @@
                   ((second variant-info) expr))
                 (bind-fields-in (field ...) variant #,type-info expr case-expr ...)]
                ...
-               [else else-expr ...]))))]
+               [else else-expr ...])))))]
     [(_ type-id test-expr [variant (field ...) case-expr ...] ...)
      ;; Ensure that everything that should be an identifier is an identifier
      ;; and all clauses have bodies.
@@ -477,7 +478,8 @@
        (map (ensure-variant-present stx #'(variant ...))
             (map first type-info))
 
-       #`(let ([expr test-expr])
+       (quasisyntax/loc stx
+         (let ([expr test-expr])
            (if (not (#,type? expr))
              #,(syntax/loc #'test-expr
                  (error 'type-case "expected a value from type ~a, got: ~e"
@@ -488,7 +490,7 @@
                   ((second variant-info) expr))
                 (bind-fields-in (field ...) variant #,type-info expr case-expr ...)]
                ...
-               [else (error 'type-case bug:fallthru-no-else)]))))]
+               [else (error 'type-case bug:fallthru-no-else)])))))]
     ;;; The remaining clauses are for error reporting only.  If we got this
     ;;; far, either the clauses are malformed or the error is completely
     ;;; unintelligible.

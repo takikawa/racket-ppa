@@ -44,7 +44,7 @@ A function with optional arguments.}
            (popt-lambda: (a ... a ooo) formals . body)]]{
 A polymorphic function with optional arguments.}
 
-@defalias[case-lambda: case-lambda]
+@defalias[case-lambda: case-lambda "syntax"]
 
 @defform*[[(pcase-lambda: (a ...) [formals body] ...)
            (pcase-lambda: (a ... b ooo) [formals body] ...)]]{
@@ -131,11 +131,25 @@ preferred to use of @racket[define:].
       (func first rest))]
 }
 
-@defalias[struct: struct]
-@defalias[define-struct: define-struct]
-@defalias[define-struct/exec: define-struct/exec]
+@defform/subs[#:literals (:)
+(define-struct/exec name-spec ([f : t] ...) [e : proc-t] maybe-type-name)
+([name-spec name-id (code:line (name-id parent))]
+ [maybe-type-name (code:line)
+                  (code:line #:type-name type-id)])]{
+Equivalent to using @racket[define-struct] to define a structure with
+the property @racket[prop:procedure] supplied with the procedure @racket[e] of
+type @racket[proc-t].
 
-@defalias[for: for]
+@history[#:changed "1.13" @elem{Deprecated}]
+@history[#:changed "1.4" @elem{Added the @racket[#:type-name] option.}]}
+
+
+
+@defalias[struct: struct "syntax"]
+@defalias[define-struct: define-struct "syntax"]
+@defalias[define-struct/exec: define-struct/exec "syntax"]
+
+@defalias[for: for "syntax"]
 @deftogether[(@defidform[for*/and:]
               @defidform[for*/first:]
               @defidform[for*/flvector:]
@@ -173,7 +187,7 @@ preferred to use of @racket[define:].
               @defidform[for/vector:])]{
  Aliases for the same iteration forms without a @racket[_:].
 @history[#:changed "1.12" @elem{Added @racket[for/foldr:] and @racket[for*/foldr:].}]}
-@defalias[do: do]
+@defalias[do: do "syntax"]
 
 @defidform[define-type-alias]{Equivalent to @racket[define-type].}
 @defidform[define-typed-struct]{Equivalent to @racket[define-struct:]}
@@ -186,9 +200,9 @@ keyword with @racket[require/typed].}
 @defidform[pdefine:]{Defines a polymorphic function.}
 @defform[(pred t)]{Equivalent to @racket[(Any -> Boolean : t)].}
 
-@defalias[Un U]
-@defalias[mu Rec]
-@defalias[Tuple List]
-@defalias[Parameter Parameterof]
-@defalias[Pair Pairof]
-@defalias[values Values]
+@defalias[Un U "type constructor"]
+@defalias[mu Rec "syntax"]
+@defalias[Tuple List "type constructor"]
+@defalias[Parameter Parameterof "type constructor"]
+@defalias[Pair Pairof "type constructor"]
+@defalias[values Values "type constructor"]

@@ -472,8 +472,9 @@
     (make-custodian me))
   (define timeout-evt
     (handle-evt
-     (alarm-evt (+ (current-inexact-milliseconds)
-                   (* 1000 secs)))
+     (alarm-evt (+ (current-inexact-monotonic-milliseconds)
+                   (* 1000 secs))
+                #t)
      (λ (a) #f)))
 
   (define results null)
@@ -543,8 +544,11 @@
   (define new-ns  ((car specs)))
   (define orig-ns (namespace-anchor->empty-namespace anchor))
   (define mods    (cdr specs))
-  (parameterize ([current-namespace orig-ns])
-    (for ([mod (in-list mods)]) (dynamic-require mod #f)))
+  (namespace-call-with-registry-lock
+   orig-ns
+   (lambda ()
+     (parameterize ([current-namespace orig-ns])
+       (for ([mod (in-list mods)]) (dynamic-require mod #f)))))
   (parameterize ([current-namespace new-ns])
     (for ([mod (in-list mods)]) (namespace-attach-module orig-ns mod)))
   new-ns)
@@ -646,8 +650,11 @@
          (read-decimal-as-inexact #f)
          ;; needed to make the test-engine work
          (define orig-ns (namespace-anchor->empty-namespace anchor))
-         (parameterize ([current-namespace orig-ns])
-           (dynamic-require 'racket/class #f))
+         (namespace-call-with-registry-lock
+          orig-ns
+          (lambda ()
+            (parameterize ([current-namespace orig-ns])
+              (dynamic-require 'racket/class #f))))
          (namespace-attach-module orig-ns 'racket/class)]))
 
 ;; Returns a single (module ...) or (begin ...) expression (a `begin' list will
@@ -756,7 +763,7 @@
                                                      [(mod-path wrt-resolved-mod src-stx load?)
                                                       ;; The intent is that a non-#f `src-stx` indicates
                                                       ;; a `require` that appears in `program` --- as opposed
-                                                      ;; to, say, a `dynamic-reuire` that implements a
+                                                      ;; to, say, a `dynamic-require` that implements a
                                                       ;; `lazy-require` in a macro implementation
                                                       (when src-stx
                                                         (unless (or (member mod-path allow-syntactic-requires)

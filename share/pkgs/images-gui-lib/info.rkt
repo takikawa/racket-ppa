@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base" "draw-lib" "gui-lib" "string-constants-lib"))) (define pkg-desc "Functions for constructing icons and logos") (define pkg-authors (quote (ntoronto)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base" "draw-lib" "gui-lib" "string-constants-lib"))) (define pkg-desc "Functions for constructing icons and logos") (define pkg-authors (quote (ntoronto))) (define license (quote (Apache-2.0 OR MIT)))))

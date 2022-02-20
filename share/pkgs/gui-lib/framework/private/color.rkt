@@ -14,6 +14,7 @@ added get-regions
          syntax-color/paren-tree
          syntax-color/default-lexer
          syntax-color/lexer-contract
+         syntax-color/color-textoid
          string-constants
          "../preferences.rkt"
          "sig.rkt"
@@ -40,16 +41,32 @@ added get-regions
 (define (should-color-type? type)
   (not (memq type '(no-color))))
 
-(define (make-data type mode backup-delta) 
+(define (make-data attribs mode backup-delta) 
   (if (zero? backup-delta)
-      (cons type mode)
-      (vector type mode backup-delta)))
-(define (data-type data) (if (pair? data) (car data) (vector-ref data 0)))
+      (cons attribs mode)
+      (vector attribs mode backup-delta)))
+(define (data-attribs data) (if (pair? data) (car data) (vector-ref data 0)))
+(define (data-type data) (attribs->type (data-attribs data)))
+(define (data-color-type data) (attribs->color-type (data-attribs data)))
 (define (data-lexer-mode data) (if (pair? data) (cdr data) (vector-ref data 1)))
 (define (data-backup-delta data) (if (vector? data) (vector-ref data 2) 0))
 
+(define (attribs->type attribs)
+  (if (symbol? attribs)
+      attribs
+      (hash-ref attribs 'type 'unknown)))
+(define (attribs->color-type attribs)
+  (if (symbol? attribs)
+      attribs
+      (or (hash-ref attribs 'color #f)
+          (hash-ref attribs 'type 'unknown))))
+(define (attribs->table attribs)
+  (if (symbol? attribs)
+      (hasheq 'type attribs)
+      attribs))
+
 (define -text<%>
-  (interface (text:basic<%>)
+  (interface (text:basic<%> color-textoid<%>)
     start-colorer
     stop-colorer
     force-stop-colorer
@@ -61,21 +78,25 @@ added get-regions
     
     reset-region
     reset-regions
-    get-regions
     
     is-lexer-valid?
     on-lexer-valid
 
     get-matching-paren-string
-    
-    skip-whitespace
-    backward-match
-    backward-containing-sexp
-    forward-match
+
+    ;; Thse are in color-textoid<%>:
+    ;;  skip-whitespace
+    ;;  backward-match
+    ;;  backward-containing-sexp
+    ;;  forward-match
+    ;;  classify-position
+    ;;  classify-position*
+    ;;  get-token-range
+    ;;  get-backward-navigation-limit
+    ;;  get-regions
+
     insert-close-paren
-    classify-position
-    get-token-range
-    
+
     set-spell-check-strings
     get-spell-check-strings
     set-spell-check-text
@@ -366,7 +387,7 @@ added get-regions
          #f]
         [else
          (define-values (_line1 _col1 pos-before) (port-next-location in))
-         (define-values (lexeme type data new-token-start new-token-end
+         (define-values (lexeme attribs paren new-token-start new-token-end
                                 backup-delta new-lexer-mode/cont)
            (get-token in in-start-pos lexer-mode))
          (define-values (_line2 _col2 pos-after) (port-next-location in))
@@ -374,34 +395,32 @@ added get-regions
                                     (dont-stop-val new-lexer-mode/cont)
                                     new-lexer-mode/cont))
          (define next-ok-to-stop? (not (dont-stop? new-lexer-mode/cont)))
+         (check-colorer-results-match-port-before-and-after
+          'color:text<%>
+          (attribs->type attribs) pos-before new-token-start new-token-end pos-after)
          (cond
-           [(eq? 'eof type) 
+           [(eq? 'eof attribs) 
             (set-lexer-state-up-to-date?! ls #t)
             (re-tokenize-move-to-next-ls start-time next-ok-to-stop?)]
            [else
-            (unless (<= pos-before new-token-start pos-after)
-              (error 'color:text<%>
-                     "expected the token start to be between ~s and ~s, got ~s"
-                     pos-before pos-after new-token-start))
-            (unless (<= pos-before new-token-end pos-after)
-              (error 'color:text<%>
-                     "expected the token end to be between ~s and ~s, got ~s"
-                     pos-before pos-after new-token-end))
             (let ((len (- new-token-end new-token-start)))
               (set-lexer-state-current-pos! ls (+ len (lexer-state-current-pos ls)))
               (set-lexer-state-current-lexer-mode! ls new-lexer-mode)
               (sync-invalid ls)
-              (when (and should-color? (should-color-type? type) (not frozen?))
-                (add-colorings type in-start-pos new-token-start new-token-end))
+              (define color-type (attribs->color-type attribs))
+              ;; note: `should-color-type?` test here means that spelling is not checked
+              ;; for 'no-color text, which is maybe not the right choice
+              (when (and should-color? (should-color-type? color-type) (not frozen?))
+                (add-colorings attribs color-type in-start-pos new-token-start new-token-end))
               ;; Using the non-spec version takes 3 times as long as the spec
               ;; version.  In other words, the new greatly outweighs the tree
               ;; operations.
-              ;;(insert-last! tokens (new token-tree% (length len) (data type)))
+              ;;(insert-last! tokens (new token-tree% (length len) (data attribs)))
               (insert-last-spec! (lexer-state-tokens ls)
                                  len
-                                 (make-data type new-lexer-mode backup-delta))
+                                 (make-data attribs new-lexer-mode backup-delta))
               #; (show-tree (lexer-state-tokens ls))
-              (send (lexer-state-parens ls) add-token data len)
+              (send (lexer-state-parens ls) add-token paren len)
               (cond
                 [(and (not (send (lexer-state-invalid-tokens ls) is-empty?))
                       (= (lexer-state-invalid-tokens-start ls)
@@ -420,13 +439,21 @@ added get-regions
                  (continue-re-tokenize start-time next-ok-to-stop?
                                        ls in in-start-pos new-lexer-mode)]))])]))
 
-    (define/private (add-colorings type in-start-pos new-token-start new-token-end)
+    (define/private (add-colorings attribs color-type in-start-pos new-token-start new-token-end)
       (define sp (+ in-start-pos (sub1 new-token-start)))
       (define ep (+ in-start-pos (sub1 new-token-end)))
-      (define style-name (token-sym->style type))
-      (define color (send (get-style-list) find-named-style style-name))
+      (define style-name (token-sym->style color-type))
+      (define base-color (send (get-style-list) find-named-style style-name))
+      (define color (if (and (hash? attribs) (hash-ref attribs 'comment? #f))
+                        (let ([d (new style-delta%)]
+                              [base-color (or base-color (send (get-style-list) find-named-style "Standard"))])
+                          ;; 50% transparency:
+                          (send (send d get-foreground-mult) set-a 0.5)
+                          (and base-color
+                               (send (get-style-list) find-or-create-style base-color d)))
+                        base-color))
       (cond
-        [(do-spell-check? type)
+        [(do-spell-check? (attribs->type attribs))
          (define misspelled-color
            (send (get-style-list) find-named-style misspelled-text-color-style-name))
          (cond
@@ -648,9 +675,9 @@ added get-regions
                             get-token-
                             ;; Old interface: no offset, backup delta, or mode
                             (lambda (in offset mode)
-                              (let-values ([(lexeme type data new-token-start new-token-end) 
+                              (let-values ([(lexeme attribs paren new-token-start new-token-end) 
                                             (get-token- in)])
-                                (values lexeme type data new-token-start new-token-end 0 #f)))))
+                                (values lexeme attribs paren new-token-start new-token-end 0 #f)))))
         (set! pairs pairs-)
         (for-each
          (lambda (ls)
@@ -723,10 +750,10 @@ added get-regions
                            [start-pos (lexer-state-start-pos ls)])
                        (send tokens for-each
                              (λ (start len data)
-                               (let ([type (data-type data)])
-                                 (when (should-color-type? type)
+                               (let ([color-type (data-color-type data)])
+                                 (when (should-color-type? color-type)
                                    (let ((color (send (get-style-list) find-named-style
-                                                      (token-sym->style type)))
+                                                      (token-sym->style color-type)))
                                          (sp (+ start-pos start))
                                          (ep (+ start-pos (+ start len))))
                                      (change-style color sp ep #f))))))))
@@ -937,6 +964,8 @@ added get-regions
         (cond
           ((or (eq? x 'open) (eq? x 'beginning)) #f)
           (else x))))
+
+    (define/public (get-backward-navigation-limit pos) 0)
     
     (define/private (internal-backward-match position cutoff)
       (when stopped?
@@ -995,7 +1024,14 @@ added get-regions
       (and tokens
            (let ([root-data (send tokens get-root-data)])
              (and root-data
-                  (data-type root-data)))))
+                  (attribs->type (data-attribs root-data))))))
+    
+    (define/public (classify-position* position)
+      (define-values (tokens ls) (get-tokens-at-position 'classify-position* position))
+      (and tokens
+           (let ([root-data (send tokens get-root-data)])
+             (and root-data
+                  (attribs->table (data-attribs root-data))))))
     
     (define/public (get-token-range position)
       (define-values (tokens ls) (get-tokens-at-position 'get-token-range position))
@@ -1361,7 +1397,7 @@ added get-regions
 
 (define -text% (text-mixin text:keymap%))
 
-(define -text-mode<%> (interface () set-get-token))
+(define -text-mode<%> (interface () set-get-token set-matches))
 
 (define text-mode-mixin
   (mixin (mode:surrogate-text<%>) (-text-mode<%>)
@@ -1381,6 +1417,9 @@ added get-regions
 
     (define/public (set-get-token _get-token)
       (set! get-token _get-token))
+
+    (define/public (set-matches _matches)
+      (set! matches _matches))
     
     (super-new)))
 

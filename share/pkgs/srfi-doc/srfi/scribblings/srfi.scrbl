@@ -13,7 +13,7 @@
 
 @title{SRFIs: Libraries}
 
-The @link[#:style srfi-std "http://srfi.schemers.org/"]{Scheme Requests for
+The @link[#:style srfi-std "https://srfi.schemers.org/"]{Scheme Requests for
 Implementation} (a.k.a. @deftech{SRFI}) process allows individual
 members of the Scheme community to propose libraries and extensions to
 be supported by multiple Scheme implementations.
@@ -613,6 +613,20 @@ returns @racket[#f].
 )]
 
 @in-core{}
+
+@; ----------------------------------------
+
+@srfi[29]{Localization}
+
+@redirect[29 '(
+ (current-language #f "current-language")
+ (current-country #f "current-country")
+ (current-locale-details #f "current-locale-details")
+ (declare-bundle! #f "declare-bundle!")
+ (store-bundle #f "store-bundle")
+ (load-bundle! #f "load-bundle!")
+ (localized-template #f "localized-template")
+)]
 
 @; ----------------------------------------
 

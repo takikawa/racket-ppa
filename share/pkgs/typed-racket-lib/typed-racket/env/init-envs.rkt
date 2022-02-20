@@ -7,11 +7,15 @@
          "global-env.rkt"
          "type-name-env.rkt"
          "type-alias-env.rkt"
+         "type-constr-env.rkt"
          "mvar-env.rkt"
          "signature-env.rkt"
          "struct-name-env.rkt"
+         "../private/user-defined-type-constr.rkt"
+         "../typecheck/struct-type-constr.rkt"
          "../rep/core-rep.rkt"
          "../rep/type-rep.rkt"
+         "../rep/type-constr.rkt"
          "../rep/prop-rep.rkt"
          "../rep/rep-utils.rkt"
          "../rep/object-rep.rkt"
@@ -140,11 +144,11 @@
     [(Promise: ty)
      `(make-Promise ,(type->sexp ty))]
     [(Ephemeron: ty)
-     `(make-Ephemeron ,(type->sexp ty))]
+     `(-Ephemeron ,(type->sexp ty))]
     [(Weak-Box: ty)
      `(make-Weak-Box ,(type->sexp ty))]
     [(CustodianBox: ty)
-     `(make-CustodianBox ,(type->sexp ty))]
+     `(-CustodianBox ,(type->sexp ty))]
     [(Set: ty)
      `(make-Set ,(type->sexp ty))]
     [(Evt: ty)
@@ -152,9 +156,9 @@
     [(Future: ty)
      `(make-Future ,(type->sexp ty))]
     [(Prompt-Tagof: prompt handler)
-     `(make-Prompt-Tagof ,(type->sexp prompt) ,(type->sexp handler))]
+     `(-Prompt-Tagof ,(type->sexp prompt) ,(type->sexp handler))]
     [(Continuation-Mark-Keyof: ty)
-     `(make-Continuation-Mark-Keyof ,(type->sexp ty))]
+     `(-Continuation-Mark-Keyof ,(type->sexp ty))]
     [(Sequence: tys)
      `(-seq ,@(map type->sexp tys))]
     [(SequenceDots: tys dty dbound)
@@ -285,9 +289,9 @@
      `(make-Opaque (quote-syntax ,pred))]
     [(Refinement: parent pred)
      `(make-Refinement ,(type->sexp parent) (quote-syntax ,pred))]
-    [(Mu-maybe-name: n (? Type? b))
+    [(Mu-maybe-name: (list n) (? Type? b))
      `(make-Mu (quote ,n) ,(type->sexp b))]
-    [(Mu: n b)
+    [(Mu: (list n) b)
      `(make-Mu (quote ,n) ,(type->sexp b))]
     [(Poly-names: ns b)
      `(make-Poly (list ,@(for/list ([n (in-list ns)])
@@ -297,11 +301,11 @@
      `(make-PolyDots (list ,@(for/list ([n (in-list ns)])
                            `(quote ,n)))
                      ,(type->sexp b))]
-    [(PolyRow-names: ns c b)
+    [(PolyRow-names: ns b c)
      `(make-PolyRow (list ,@(for/list ([n (in-list ns)])
                               `(quote ,n)))
-                    (quote ,c)
-                    ,(type->sexp b))]
+                    ,(type->sexp b)
+                    (quote ,c))]
     [(Row: inits fields methods augments init-rest)
      `(make-Row (list ,@(convert-row-clause inits #t))
                 (list ,@(convert-row-clause fields))
@@ -359,7 +363,10 @@
     [(Value: v) `(make-Value (quote ,v))]
     ;; Most Top types are in the predefined table, the ones here
     ;; are not
-    [(StructTop: name) `(make-StructTop ,(type->sexp name))]))
+    [(StructTop: name) `(make-StructTop ,(type->sexp name))]
+    [(TypeConstructor constr arity kind*? productive?)
+     (define constr^ (gen-serialize-type-rep constr type->sexp))
+     `(make-type-constr ,constr^ ,arity ,productive? #:kind*? ,kind*?)]))
 
 ;; Helper for class/row clauses
 (define (convert-row-clause members [inits? #f])
@@ -477,6 +484,16 @@
     (λ (f) (free-id-table-map mvar-env f))
     (lambda (id v) (and v #`(register-mutated-var #'#,id)))))
 
+(define (type-constructor-env-init)
+  (make-init-code
+   kind-env-map
+   (lambda (id v)
+     ;; TODO: turn this into a function
+     (match-define (TypeConstructor constr arity kind*? productive?) v)
+     (define constr^ (gen-serialize-type-rep constr type->sexp))
+     #`(register-type-constructor! #'#,id
+                                   (make-type-constr #,constr^ #,arity #,productive? #:kind*? #,kind*?)))))
+
 ;; see 'finalize-signatures!' in 'env/signature-env.rkt',
 ;; which forces these delays after all the signatures are parsed
 (define (signature-env-init-code)
@@ -506,7 +523,8 @@
           (mvar-env-init-code mvar-env)
           (signature-env-init-code)
           (make-struct-table-code)
-          (struct-name-env-init)))
+          (struct-name-env-init)
+          (type-constructor-env-init)))
 
   ;; get the lifted common expressions for types which need to come first
   (list* (get-extra-type-definitions)

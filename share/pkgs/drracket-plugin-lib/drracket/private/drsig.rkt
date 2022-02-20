@@ -145,7 +145,8 @@
   (get-online-expansion-pref-funcs
    (struct online-expansion-handler (mod-path id local-handler monitor?))
    get-online-expansion-handlers
-   no-more-online-expansion-handlers))
+   no-more-online-expansion-handlers
+   interactions-text-mixin))
 
 (define-signature drracket:get-collection-cm^ ())
 (define-signature drracket:get-collection^ extends drracket:get-collection-cm^

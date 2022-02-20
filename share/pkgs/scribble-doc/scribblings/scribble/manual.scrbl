@@ -616,7 +616,7 @@ corresponding @racketidfont{racket...} binding.}
 
 @defform/subs[(defmodule maybe-req one-or-multi option ... pre-flow ...)
               ([maybe-req code:blank
-                          (code:line #:require-form content-expr)]
+                          (code:line #:require-form content-or-proc-expr)]
                [one-or-multi module-spec
                              (code:line #:multi (module-spec ...+))]
                [module-spec module-path
@@ -644,8 +644,10 @@ a @racket[#:module-paths] clause, which provides a plain
 
 If a @racket[#:require-form] clause is provided and if @racket[#:lang]
 and @racket[#:reader] are not provided, the given expression produces
-content to use instead of @racket[require] for the declaration of the
-module. The @racket[#:require-form] clause is useful to suggest a
+either content to use instead of @racket[require] for the declaration of the
+module, or a procedure that takes the typeset module name as an element and
+returns an element to use for the @racket[require] form. The
+@racket[#:require-form] clause is useful to suggest a
 different way of accessing the module instead of through
 @racket[require].
 
@@ -699,7 +701,9 @@ Each @racket[option] form can appear at most once, and @racket[#:lang]
 and @racket[#:reader] are mutually exclusive.
 
 The @tech{decode}d @racket[pre-flow]s introduce the module, but need
-not include all of the module content.}
+not include all of the module content.
+
+@history[#:changed "1.43" @elem{Support a procedure value for @racket[#:require-form].}]}
 
 
 @defform[#:literals (unquote)
@@ -1552,11 +1556,13 @@ Specifies the target maximum width in characters for the output of
 @; ------------------------------------------------------------------------
 @section[#:tag "doc-classes"]{Documenting Classes and Interfaces}
 
-@defform/subs[(defclass maybe-link id super (intf-id ...) pre-flow ...)
+@defform/subs[(defclass maybe-link id super (intf ...) pre-flow ...)
               ([maybe-link code:blank
                            (code:line #:link-target? link-target?-expr)]
                [super super-id
-                      (mixin-id super)])]{
+                      (mixin-id super)]
+               [intf intf-id
+                     [#:no-inherit intf-id]])]{
 
 Creates documentation for a class @racket[id] that is a subclass of
 @racket[super] and implements each interface @racket[intf-id]. Each
@@ -1569,9 +1575,17 @@ general documentation about the class, followed by constructor
 definition (see @racket[defconstructor]), and then field and method
 definitions (see @racket[defmethod]). In rendered form, the
 constructor and method specification are indented to visually group
-them under the class definition.}
+them under the class definition.
 
-@defform[(defclass/title maybe-link id super (intf-id ...) pre-flow ...)]{
+When an @racket[intf-id] is specified with @racket[#:no-inherit], then
+the set of inherited methods for @racket[id] does not include methods
+from @racket[intf-id]. Omitting methods in this way can avoid a
+documentation dependency when no direct reference to a method of
+@racket[intf-id] is needed.
+
+@history[#:changed "1.42" @elem{Added @racket[#:no-inherit] for @racket[intf].}]}
+
+@defform[(defclass/title maybe-link id super (intf ...) pre-flow ...)]{
 
 Like @racket[defclass], also includes a @racket[title] declaration
 with the style @racket['hidden]. In addition, the constructor and
@@ -1579,17 +1593,23 @@ methods are not left-indented.
 
 This form is normally used to create a section to be rendered on its
 own HTML. The @racket['hidden] style is used because the definition
-box serves as a title.}
+box serves as a title.
 
-@defform[(definterface id (intf-id ...) pre-flow ...)]{
+@history[#:changed "1.42" @elem{Added @racket[#:no-inherit] for @racket[intf].}]}
+
+@defform[(definterface id (intf ...) pre-flow ...)]{
 
 Like @racket[defclass], but for an interfaces. Naturally,
-@racket[pre-flow] should not generate a constructor declaration.}
+@racket[pre-flow] should not generate a constructor declaration.
 
-@defform[(definterface/title id (intf-id ...) pre-flow ...)]{
+@history[#:changed "1.42" @elem{Added @racket[#:no-inherit] for @racket[intf].}]}
+
+@defform[(definterface/title id (intf ...) pre-flow ...)]{
 
 Like @racket[definterface], but for single-page rendering as in
-@racket[defclass/title].}
+@racket[defclass/title].
+
+@history[#:changed "1.42" @elem{Added @racket[#:no-inherit] for @racket[intf].}]}
 
 @defform[(defmixin id (domain-id ...) (range-id ...) pre-flow ...)]{
 
@@ -1597,7 +1617,11 @@ Like @racket[defclass], but for a mixin. Any number of
 @racket[domain-id] classes and interfaces are specified for the
 mixin's input requires, and any number of result classes and (more
 likely) interfaces are specified for the @racket[range-id]. The
-@racket[domain-id]s supply inherited methods.}
+@racket[domain-id]s supply inherited methods, and they can include
+interfaces annotated with @racket[#:no-inherit].
+
+@history[#:changed "1.42" @elem{Added @racket[#:no-inherit] support for
+                                @racket[domain-id].}]}
 
 @defform[(defmixin/title id (domain-id ...) (range-id ...) pre-flow ...)]{
 

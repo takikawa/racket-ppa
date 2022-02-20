@@ -58,8 +58,6 @@
 	      @#,racket[(enum expr (... ...))]
 	      @#,racket[(mixed sig (... ...))]
 	      @#,racket[(code:line (sig (... ...) -> sig) (code:comment @#,seclink["proc-signature"]{Funktions-Signatur}))]
-	      @#,racket[(list-of sig)]
-	      @#,racket[(nonempty-list-of sig)]
 	      @#,racket[(code:line %a %b %c (code:comment @#,seclink["signature-variable"]{Signatur-Variable}))]
 	      @#,racket[(combined sig (... ...))]
 	      signature-rule ...

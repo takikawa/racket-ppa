@@ -3,7 +3,8 @@
          racket/gui/base
          racket/contract
          string-constants
-         framework)
+         framework
+         syntax-color/racket-navigation)
 
 (provide determine-spaces paragraph-indentation keystrokes)
 
@@ -131,7 +132,7 @@
         [(is-text? txt pos)
          pos]
         [else
-         (define containing-start (send txt find-up-sexp pos))
+         (define containing-start (find-up-sexp txt pos))
          (define pos-para (send txt position-paragraph pos))
          (cond
            [(not containing-start)
@@ -199,12 +200,12 @@
      ;;
      ;; #f means no limit
      (define-values (start-sexp-boundary end-sexp-boundary)
-       (let ([first-container (send txt find-up-sexp pos)])
+       (let ([first-container (find-up-sexp txt pos)])
          (cond
            [first-container
             (define start-sexp-boundary
               (let loop ([pos pos])
-                (define container (send txt find-up-sexp pos))
+                (define container (find-up-sexp txt pos))
                 (cond
                   [container
                    (define paren (send txt get-character container))
@@ -275,8 +276,23 @@
                          (send txt paragraph-end-position para))])
     (char-whitespace? (send txt get-character x))))
 
-;; note: this might change the number of characters in the text, if
-;; it chooses to break right after a {; the result accounts for that.
+;; note: if "Disable" is changed below, this function might change the
+;; number of characters in the text, if it chooses to break right
+;; after a {, like this:
+;;   a long line that has @formatted{text} inside
+;;  =>
+;;   a long line that has @formatted{
+;;    text} inside
+;; Unfortunately, reindenting later might need to take the space back,
+;; and that doesn't currently happen:
+;;   a long line that has @formatted{
+;;    text} inside
+;;  =>
+;;   a long line that has @formatted{ text} inside
+;;                               ----^
+;; It's a problem that the space is not removed, in case the text
+;; started that way, but we reduce the problem for now by not introducing
+;; space like that.
 (define (break-paragraphs txt start-position end-position width)
   (define δ 0)
 
@@ -306,6 +322,8 @@
          (define linebreak-candidate?
            (and (is-text? txt pos)
                 (or is-whitespace?
+                    ;; Disable breaking right after `{`:
+                    #;
                     (and (pos . > . 0)
                          (equal? 'parenthesis (send txt classify-position (- pos 1)))
                          (equal? #\{ (send txt get-character (- pos 1)))))))
@@ -331,7 +349,7 @@
   (define classified (send txt classify-position pos))
   (or (equal? classified 'text)
       (and (equal? classified 'white-space)
-           (let ([backward (send txt find-up-sexp pos)])
+           (let ([backward (find-up-sexp txt pos)])
              (and backward
                   (equal? (send txt get-character backward) #\{)
                   (equal? (send txt classify-position backward)
@@ -392,7 +410,7 @@
   (cond
     [para-start-skip-space
      (define char-classify (send txt classify-position para-start-skip-space))
-     (define prev-posi (send txt find-up-sexp para-start-skip-space))
+     (define prev-posi (find-up-sexp txt para-start-skip-space))
      (cond
        [prev-posi
         (define this-para (send txt position-paragraph prev-posi))
@@ -501,7 +519,7 @@
 ;;the beginning of the line it appears
 (define (count-parens txt posi)
   (define count 0)
-  (do ([p posi (send txt find-up-sexp p)]);backward-containing-sexp p 0)])
+  (do ([p posi (find-up-sexp txt p)]);backward-containing-sexp p 0)])
     ((not p) count)
     (cond [(equal? #\{ (send txt get-character p)) (set! count (add1 count))]
           [(equal? #\[ (send txt get-character p))
@@ -559,7 +577,8 @@
         (send text insert (make-string amount #\space) posi))))
   #t)
 
-
+(define (find-up-sexp t start-pos)
+  (racket-up-sexp t start-pos))
 
 (define/contract (insert-them t . strs)
   (->* ((is-a?/c text%)) #:rest (*list/c (and/c string? #rx"\n$") string?) void?)
@@ -1054,8 +1073,8 @@
                 (string-append
                  "#lang scribble/base\n"
                  "\n"
-                 "jflkda fkfjdkla f fjdklsa @figure-ref{\n"
-                 " looping-constructs-sample}.\n"))
+                 "jflkda fkfjdkla f fjdklsa @figure-ref{" ; used to allow a line break here
+                 "looping-constructs-sample}.\n"))
 
   (check-equal? (let ([t (new racket:text%)])
                   (send t insert "#lang scribble/base\n\ntest1\n     test2\n\t\ttest3\n")
@@ -1202,4 +1221,6 @@
     (send t set-position (string-length before-newline) (string-length before-newline))
     (reindent-paragraph t 'whatever-not-an-evt)
     (check-equal? (send t get-text)
-                  (string-append before-newline "\n " after-newline))))
+                  ;; the "" here used to be "\n ", but that kind of breaking
+                  ;; is now disallowed:
+                  (string-append before-newline "" after-newline))))

@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/match
+         racket/math
          racket/class
          racket/contract/option
          racket/contract
@@ -46,7 +47,7 @@
   
 (define (get-insulated-module-lexer/inside)
   (unless module-lexer
-    (set! module-lexer (waive-option (dynamic-require 'syntax-color/module-lexer 'module-lexer))))
+    (set! module-lexer (waive-option (dynamic-require 'syntax-color/module-lexer 'module-lexer*))))
   module-lexer)
 
 (define (get-definitions-text-surrogate/inside)
@@ -164,6 +165,16 @@
            (-> read-only-text/c
                exact-nonnegative-integer?
                (or/c #f exact-nonnegative-integer?)))]
+    [(drracket:range-indentation)
+     (or/c #f
+           (-> read-only-text/c
+               exact-nonnegative-integer?
+               exact-nonnegative-integer?
+               (or/c #f (listof (list/c exact-nonnegative-integer? string?)))))]
+    [(drracket:grouping-position)
+     (or/c #f
+           (-> read-only-text/c natural? natural? (or/c 'up 'down 'backward 'forward)
+               (or/c #f #t natural?)))]
     [(drracket:keystrokes)
      ;; string? is too permissive; need racket/gui to publish
      ;; the actual contract (used on `map-function`)
@@ -183,6 +194,8 @@
 
     [(drracket:opt-out-toolbar-buttons drscheme:opt-out-toolbar-buttons drracket:opt-in-toolbar-buttons)
      (or/c #f (listof symbol?))]
+    [(drracket:paren-matches) (or/c #f (listof (list/c symbol? symbol?)))]
+    [(drracket:quote-matches) (or/c #f (listof char?))]
     [else
      (error 'key->contract "unknown key")]))
 

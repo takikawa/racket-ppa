@@ -688,6 +688,18 @@
     [(Evt: r) `(Evtof ,(t->s r))]
     [(? Union? (app normalize-type type))
      (match type
+       ;; if type is (U Immutable-Vector Vector), use `Vectorof`
+       [(Union-all-flat: (list-no-order (Immutable-Vector: a) (Mutable-Vector: a^)))
+        #:when (equal? a a^)
+        `(Vectorof ,(t->s a))]
+
+       ;; if type is (U Immutable-HashTable Mutable-HashTable Weak-HashTable), use `Vectorof`
+       [(Union-all-flat: (list-no-order (Immutable-HashTable: a b)
+                                        (Mutable-HashTable: a^ b^)
+                                        (Weak-HashTable: a* b*)))
+        #:when (and (equal? a a^) (equal? a^ a*)
+                    (equal? b b^) (equal? b^ b*))
+        `(HashTable ,(t->s a) ,(t->s b))]
        [(Union-all-flat: ts)
         (define-values (covered remaining) (cover-union type ts ignored-names))
         (match (sort (append covered (map t->s remaining)) primitive<=?)
@@ -736,7 +748,7 @@
     [(PolyDots-names: (list names ... dotted) body)
      `(All ,(append names (list dotted '...)) ,(t->s body))]
     ;; FIXME: should this print constraints too
-    [(PolyRow-names: names _ body)
+    [(PolyRow-names: names body _)
      `(All (,(car names) #:row) ,(t->s body))]
     [(Some-names: n body)
      `(Some ,n ,(t->s body))]
@@ -761,7 +773,7 @@
                       #t]
                      [_ #f])))
      'Syntax]
-    [(Mu-maybe-name: name (? Type? body))
+    [(Mu-maybe-name: (list name) (? Type? body))
      `(Rec ,name ,(t->s body))]
     [(Mu-unsafe: raw-body)
      (with-printable-names 1 name-ids

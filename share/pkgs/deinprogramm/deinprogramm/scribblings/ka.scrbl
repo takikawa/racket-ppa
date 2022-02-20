@@ -237,7 +237,7 @@ Wenn Deine Funktion zusammengesetzte Daten als Eingabe akzeptiert
 folgendermaßen vor:
 
 @itemize[
-@item{Für jede dieser Komponenten, schreibe
+@item{Für jede Komponente, schreibe
   @racket[(sel r)] in die
   Schablone, wobei @racket[sel] der Selektor der Komponente und @racket[r] der Name
   des Record-Parameters ist, also zum Beispiel:

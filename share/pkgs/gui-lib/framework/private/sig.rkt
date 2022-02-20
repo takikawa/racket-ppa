@@ -398,7 +398,11 @@
     (get-wordbreak-map
      init-wordbreak-map
      get-keymap
+     get-paren-keymap
+     get-non-paren-keymap
      setup-keymap
+     add-pairs-keybinding-functions
+     map-pairs-keybinding-functions
      add-preferences-panel
      add-coloring-preferences-panel
      
@@ -407,7 +411,9 @@
      short-sym->pref-name
      short-sym->style-name
      
-     text-balanced?))
+     text-balanced?
+
+     default-paren-matches))
   
   (define-signature main-class^ ())
   (define-signature main^ extends main-class^ ())

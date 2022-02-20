@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Libraries for handling zo files") (define pkg-authors (quote (mflatt))) (define version "1.3")))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Libraries for handling zo files") (define pkg-authors (quote (mflatt))) (define version "1.3") (define license (quote (Apache-2.0 OR MIT)))))
