@@ -416,8 +416,6 @@ please adhere to these guidelines:
  (fixup-open-brackets "左角括弧を自動調整する")
  (fixup-close-parens "右括弧を自動調整する")
  (flash-paren-match "対応する括弧をフラッシュする")
- (auto-save-files "ファイルを自動保存する")
- (backup-files "ファイルをバックアップする")
  (map-delete-to-backspace "Delete キーを Backspace キーとして処理する")
  (verify-exit "DrRacket 終了時に確認をとる")
  (ask-before-changing-format "保存形式を変更する前に確認をとる")
@@ -756,7 +754,7 @@ please adhere to these guidelines:
  ;;; autosaving
  (error-autosaving "\"~a\" を自動保存中にエラーが発生しました。") ;; ~a will be a filename
  (autosaving-turned-off "このファイルが保存されるまで、\n自動保存は無効になります。")
- (recover-autosave-files-frame-title "自動保存ファイルの復元")
+ ;(recover-autosave-files-frame-title "自動保存ファイルの復元")
  (autosave-details "詳細")
  (autosave-recover "復元")
  (autosave-unknown-filename "<<unknown>>")
@@ -767,15 +765,15 @@ please adhere to these guidelines:
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "自動保存ファイル:")
+  ;(autosave-autosave-label: "自動保存ファイル:")
   (autosave-original-label: "元のファイル:")
-  (autosave-autosave-label "自動保存ファイル")
+  ;(autosave-autosave-label "自動保存ファイル")
   (autosave-original-label "元のファイル")
-  (autosave-compare-files "自動保存ファイルの比較")
+  ;(autosave-compare-files "自動保存ファイルの比較")
 
-  (autosave-show-autosave "自動保存ファイル") ;; title of a window showing the autosave file
+  ;(autosave-show-autosave "自動保存ファイル") ;; title of a window showing the autosave file
 
-  (autosave-explanation "DrRacket は自動保存ファイルを検出しました。自動保存ファイルには、未保存の作業結果が含まれている可能性があります。")
+  ;(autosave-explanation "DrRacket は自動保存ファイルを検出しました。自動保存ファイルには、未保存の作業結果が含まれている可能性があります。")
 
   (autosave-recovered! "復元しました！") ;; status of an autosave file
   (autosave-deleted "削除しました")       ;; status of an autosave file
@@ -786,7 +784,7 @@ please adhere to these guidelines:
   (autosave-done "Done")
 
   ;; appears in the file dialog
-  (autosave-restore-to-where? "自動保存ファイルを保存する場所を選択してください。")
+  ;(autosave-restore-to-where? "自動保存ファイルを保存する場所を選択してください。")
 
 
  ;;; file modified warning

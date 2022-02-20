@@ -1,4 +1,14 @@
 #lang scribble/doc
+@; SPDX-License-Identifier: (Apache-2.0 OR MIT)
+@;
+@; This Racket code in this package, including this file, is under the
+@; Apache 2.0 and MIT licenses. The user can choose the license under
+@; which they will be using the software.
+@;
+@; However, the SRFI 5 document has a restrictive licenses:
+@; see the file "srfi-5.html" for the specific license.
+@; (The implementation of `srfi/5` found in the
+@; "srfi-lib" package is not licensed restrictively.)
 @(require srfi/scribblings/util
           scribble/manual
           scribble/eval
@@ -13,7 +23,7 @@
 
 @title{SRFI Nonfree Libraries and Documentation}
 
-The @link[#:style srfi-std "http://srfi.schemers.org/"]{Scheme Requests for
+The @link[#:style srfi-std "https://srfi.schemers.org/"]{Scheme Requests for
 Implementation} (a.k.a. @deftech{SRFI}) process allows individual
 members of the Scheme community to propose libraries and extensions to
 be supported by multiple Scheme implementations.
@@ -41,23 +51,6 @@ The following SRFI specification documents are licensed restrictively.
 
 @redirect[5 '(
  (let #t "unnamed")
-)]
-
-Racket provides a free implementation of this SRFI in the @racket[srfi-lib] package.
-Only the SRFI specification document is nonfree.
-
-@; ----------------------------------------
-
-@srfi[29]{Localization}
-
-@redirect[29 '(
- (current-language #f "current-language")
- (current-country #f "current-country")
- (current-locale-details #f "current-locale-details")
- (declare-bundle! #f "declare-bundle!")
- (store-bundle #f "store-bundle")
- (load-bundle! #f "load-bundle!")
- (localized-template #f "localized-template")
 )]
 
 Racket provides a free implementation of this SRFI in the @racket[srfi-lib] package.

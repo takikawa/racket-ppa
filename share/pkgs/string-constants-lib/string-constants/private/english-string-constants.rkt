@@ -303,7 +303,7 @@ please adhere to these guidelines:
   (disable-online-expansion "Disable background expansion")
   (enable-online-expansion "Enable background expansion")
   ;; the online expansion preferences pane
-  (online-expansion "Background expansion") ;; title of prefs pane
+  (online-expansion "Background Expansion") ;; title of prefs pane
   ; the different kinds of errors
   (online-expansion-show-read-errors-as "Show read-level errors")
   (online-expansion-show-variable-errors-as "Show unbound identifier errors")
@@ -610,8 +610,8 @@ please adhere to these guidelines:
   (fixup-open-brackets "Automatically adjust opening square brackets")
   (fixup-close-parens "Automatically adjust closing parens")
   (flash-paren-match "Flash paren match")
-  (auto-save-files "Auto-save files")
-  (backup-files "Backup files")
+  (backup-unsaved-files "Make backups for unsaved files")
+  (first-change-files "Create first-change files")
   (map-delete-to-backspace "Map delete to backspace")
   (verify-exit "Verify exit")
   (ask-before-changing-format "Ask before changing save format")
@@ -1023,7 +1023,7 @@ please adhere to these guidelines:
   ;;; autosaving
   (error-autosaving "Error autosaving “~a”.") ;; ~a will be a filename
   (autosaving-turned-off "Autosaving is turned off\nuntil the file is saved.")
-  (recover-autosave-files-frame-title "Recover Autosaved Files")
+  (recover-autosave-files-frame-title "Recover Files")
   (autosave-details "Details")
   (autosave-recover "Recover")
   (autosave-unknown-filename "<<unknown>>")
@@ -1066,15 +1066,15 @@ please adhere to these guidelines:
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "Autosave file:")
+  (autosave-autosave-label: "Backup file:")
   (autosave-original-label: "Original file:")
-  (autosave-autosave-label "Autosave file")
+  (autosave-autosave-label "Backup file")
   (autosave-original-label "Original file")
-  (autosave-compare-files "Compare autosave files")
+  (autosave-compare-files "Compare backup files")
 
-  (autosave-show-autosave "Autosave file") ;; title of a window showing the autosave file
+  (autosave-show-autosave "Backup file") ;; title of a window showing the autosave file
 
-  (autosave-explanation "DrRacket found autosave files, which may contain your unsaved work.")
+  (autosave-explanation "DrRacket found backup files, which may contain your unsaved work.")
 
   (autosave-recovered! "Recovered!") ;; status of an autosave file
   (autosave-deleted "Deleted")       ;; status of an autosave file
@@ -1086,7 +1086,7 @@ please adhere to these guidelines:
   (autosave-done "Done")
 
   ;; appears in the file dialog
-  (autosave-restore-to-where? "Choose a place to save the autosave file.")
+  (autosave-restore-to-where? "Choose a place to save the backup file.")
 
   ;;; file modified warning
   (file-has-been-modified

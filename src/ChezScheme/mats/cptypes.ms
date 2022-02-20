@@ -196,6 +196,17 @@
     '(lambda (x) (vector-set! x 0 0) (set-box! x 0) 1)
     '(lambda (x) (vector-set! x 0 0) (set-box! x 0) 2))
   (cptypes-equivalent-expansion?
+    '(lambda (x) (vector-set! x x x) 1)
+    '(lambda (x) (vector-set! x x x) 2))
+  ;This test may fail because the subexpressions may be reordered
+  (cptypes-equivalent-expansion?
+    '(lambda (x) (+ (unbox x) (car x)))
+    '(lambda (x) (- (unbox x) (car x))))
+  ;Regresion test for primitives with 0 arguments after an error
+  (cptypes-equivalent-expansion?
+    '(lambda () (box (let ([x (error 'who "msg")]) (cons x (random)))))
+    '(lambda () (error 'who "msg")))
+  (cptypes-equivalent-expansion?
     '(lambda (x) (vector-set! (box 5) 0 0) 1)
     '(lambda (x) (vector-set! (box 5) 0 0) 2))
   (cptypes-equivalent-expansion?
@@ -216,6 +227,9 @@
   (cptypes-equivalent-expansion?
     '(lambda (x) (when (and (fixnum? x) (zero? x)) x))
     '(lambda (x) (when (and (fixnum? x) (zero? x)) 0)))
+  (cptypes/once-equivalent-expansion?
+    '(lambda (x) (when (fixnum? x) (zero? x) 7))
+    '(lambda (x) (when (fixnum? x) 7)))
   (cptypes-equivalent-expansion?
     '(lambda (x f) (when (list-assuming-immutable? x) (f x) (list-assuming-immutable? x)))
     '(lambda (x f) (when (list-assuming-immutable? x) (f x) #t)))
@@ -401,6 +415,33 @@
        (if (if t (unbox b) #f) (vector? b) (box? b)))
      '(lambda (t b)
        (if (if t (unbox b) #f) #f (box? b))))
+)
+
+(mat cptypes-type-specialize-numbers
+  (cptypes-equivalent-expansion?
+    '(lambda (x y) (when (and (fixnum? x) (fixnum? y)) (= x y)))
+    '(lambda (x y) (when (and (fixnum? x) (fixnum? y)) (#3%fx= x y))))
+  (cptypes-equivalent-expansion?
+    '(lambda (x y) (when (and (flonum? x) (flonum? y)) (= x y)))
+    '(lambda (x y) (when (and (flonum? x) (flonum? y)) (#3%fl= x y))))
+  (cptypes-equivalent-expansion?
+    '(lambda (x y) (when (and (fixnum? x) (fixnum? y)) (> x y)))
+    '(lambda (x y) (when (and (fixnum? x) (fixnum? y)) (#3%fx> x y))))
+  (cptypes-equivalent-expansion?
+    '(lambda (x y) (when (and (flonum? x) (flonum? y)) (> x y)))
+    '(lambda (x y) (when (and (flonum? x) (flonum? y)) (#3%fl> x y))))
+  (cptypes-equivalent-expansion?
+    '(lambda (x y) (when (and (fixnum? x) (fixnum? y)) (max x y)))
+    '(lambda (x y) (when (and (fixnum? x) (fixnum? y)) (#3%fxmax x y))))
+  (cptypes-equivalent-expansion?
+    '(lambda (x y) (when (and (flonum? x) (flonum? y)) (max x y)))
+    '(lambda (x y) (when (and (flonum? x) (flonum? y)) (#3%flmax x y))))
+  (cptypes/once-equivalent-expansion?
+    '(lambda (x y) (when (and (fixnum? x) (fixnum? y)) (fixnum? (max x y))))
+    '(lambda (x y) (when (and (fixnum? x) (fixnum? y)) (#3%fxmax x y) #t)))
+  (cptypes/once-equivalent-expansion?
+    '(lambda (x y) (when (and (flonum? x) (flonum? y)) (flonum? (max x y))))
+    '(lambda (x y) (when (and (flonum? x) (flonum? y)) (#3%flmax x y) #t)))
 )
 
 (mat cptype-directly-applied-case-lambda

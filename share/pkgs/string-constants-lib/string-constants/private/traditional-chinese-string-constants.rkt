@@ -415,8 +415,6 @@
   (fixup-open-brackets "自動調整開中括號")
   (fixup-close-parens "自動調整閉括號")
   (flash-paren-match "高亮顯示括號匹配")
-  (auto-save-files "自動保存文件")
-  (backup-files "保存備份文件")
   (map-delete-to-backspace "將delete轉換成backspace")
   (verify-exit "退出時確認")
   (ask-before-changing-format "改變保存方式時確認")
@@ -784,7 +782,7 @@
   ;;; autosaving
   (error-autosaving "自動保存\"~a\"時出錯。") ;; ~a will be a filename
   (autosaving-turned-off "在文件被存檔之前，自動保存不會進行")
-  (recover-autosave-files-frame-title "恢復自動保存的文件")
+  ;(recover-autosave-files-frame-title "恢復自動保存的文件")
   (autosave-details "詳細情況")
   (autosave-recover "恢復")
   (autosave-unknown-filename "《未知》")
@@ -795,15 +793,15 @@
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "自動保存文件：")
+  ;(autosave-autosave-label: "自動保存文件：")
   (autosave-original-label: "原始文件：")
-  (autosave-autosave-label "自動保存文件")
+  ;(autosave-autosave-label "自動保存文件")
   (autosave-original-label "原始文件")
-  (autosave-compare-files "比較自動保存文件")
+  ;(autosave-compare-files "比較自動保存文件")
   
-  (autosave-show-autosave "自動保存文件") ;; title of a window showing the autosave file
+  ;(autosave-show-autosave "自動保存文件") ;; title of a window showing the autosave file
   
-  (autosave-explanation "DrRacket發現了自動保存的文件，其中可能包含你沒有保存過的程序")
+  ;(autosave-explanation "DrRacket發現了自動保存的文件，其中可能包含你沒有保存過的程序")
   
   (autosave-recovered! "已恢復！") ;; status of an autosave file
   (autosave-deleted "已刪除")       ;; status of an autosave file
@@ -814,7 +812,7 @@
   (autosave-done "完成")
   
   ;; appears in the file dialog
-  (autosave-restore-to-where? "請選擇自動保存文件的位置")
+  ;(autosave-restore-to-where? "請選擇自動保存文件的位置")
   
   
   ;;; file modified warning

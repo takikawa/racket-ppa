@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define version "1.0") (define deps (quote (("base" #:version "6.2.900.6")))) (define pkg-authors (quote (ryanc))) (define test-responsibles (quote ((all ryanc))))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define version "1.0") (define deps (quote (("base" #:version "6.2.900.6")))) (define pkg-authors (quote (ryanc))) (define test-responsibles (quote ((all ryanc)))) (define license (quote (Apache-2.0 OR MIT)))))

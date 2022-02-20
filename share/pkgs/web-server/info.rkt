@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("web-server-lib" "web-server-doc"))) (define implies (quote ("web-server-lib" "web-server-doc"))) (define pkg-desc "An HTTP server") (define pkg-authors (quote (jay)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("web-server-lib" "web-server-doc"))) (define implies (quote ("web-server-lib" "web-server-doc"))) (define pkg-desc "An HTTP server") (define pkg-authors (quote (jay))) (define license (quote (Apache-2.0 OR MIT)))))

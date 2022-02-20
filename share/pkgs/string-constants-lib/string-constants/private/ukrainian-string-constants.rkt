@@ -421,8 +421,6 @@ please adhere to these guidelines:
  (fixup-open-brackets "Автокорекція квадратних дужок, які відкриваються")
  (fixup-close-parens "Автокорекція дужок, які закриваються")
  (flash-paren-match "Відображати відповідність дужок")
- (auto-save-files "Автозбереження файлів")
- (backup-files "Резервні копії файлів")
  (map-delete-to-backspace "Призначити Delete на Backspace")
  (verify-exit "Перевіряти завершення")
  (ask-before-changing-format "Запитувати перед зміною формату")
@@ -762,7 +760,7 @@ please adhere to these guidelines:
  ;;; autosaving
  (error-autosaving "Помилка автозбереження \"~a\".") ;; ~a will be a filename
  (autosaving-turned-off "Автозбереження відключене\nпід час запису файлу.")
- (recover-autosave-files-frame-title "Відновлення автозбережених файлів")
+ ;(recover-autosave-files-frame-title "Відновлення автозбережених файлів")
  (autosave-details "Подробиці")
  (autosave-recover "Відновлений")
  (autosave-unknown-filename "<<невідомий>>")
@@ -773,15 +771,15 @@ please adhere to these guidelines:
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "Автозбереження файлу:")
+  ;(autosave-autosave-label: "Автозбереження файлу:")
   (autosave-original-label: "Вихідний файл:")
-  (autosave-autosave-label "Автозбереження файлу")
+  ;(autosave-autosave-label "Автозбереження файлу")
   (autosave-original-label "Вихідний файл")
-  (autosave-compare-files "Порівняти автозбережені файли")
+  ;(autosave-compare-files "Порівняти автозбережені файли")
 
-  (autosave-show-autosave "Автозбереження файлу") ;; title of a window showing the autosave file
+  ;(autosave-show-autosave "Автозбереження файлу") ;; title of a window showing the autosave file
 
-  (autosave-explanation "DrRacket знайшов Ваші файли автозбереження, які можуть містити незбережену роботу.")
+  ;(autosave-explanation "DrRacket знайшов Ваші файли автозбереження, які можуть містити незбережену роботу.")
 
   (autosave-recovered! "Відновити!") ;; status of an autosave file
   (autosave-deleted "Видалити")       ;; status of an autosave file
@@ -792,7 +790,7 @@ please adhere to these guidelines:
   (autosave-done "Завершено")
   
   ;; appears in the file dialog
-  (autosave-restore-to-where? "Оберіть місце для запису автозбереженого файлу.")
+  ;(autosave-restore-to-where? "Оберіть місце для запису автозбереженого файлу.")
   
   
  ;;; file modified warning

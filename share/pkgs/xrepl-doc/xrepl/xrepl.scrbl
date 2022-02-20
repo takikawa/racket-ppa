@@ -13,12 +13,20 @@
 @defmodule[xrepl]{
   XREPL extends the @exec{racket} @tech[#:doc GUIDE]{REPL} significantly,
   turning it into a more useful tool for interactive exploration and
-  development. Additions include ``meta commands,'' using readline, keeping
+  development. Additions include ``meta commands,'' using expeditor or readline, keeping
   past evaluation results, and more.
 
-  XREPL is enabled by default in the Racket REPL when the
-  @racketfont{xrepl-lib} package is installed.
-  }
+  XREPL is enabled by default when running @exec{racket} when the
+  @racketmodname[xrepl] module is available. More specifically, XREPL
+  is loaded via @racketmodname[racket/interactive], which is loaded by
+  default for a REPL is started. When the @racketmodname[expeditor
+  #:indirect] module is available and either
+  @racket[current-interaction-info] is set to a vector or
+  @racket[current-read-interaction] has its default value, then the
+  @racketmodname[expeditor #:indirect] expression editor is used. If
+  @racketmodname[expeditor #:indirect] is not used and
+  @racketmodname[readline] is available, then @racketmodname[readline]
+  is used.}
 
 @; ---------------------------------------------------------------------
 @section{Meta REPL Commands}
@@ -305,6 +313,16 @@ available.
   (trusted) sandbox, using the @racketmodname[racket/sandbox] library
   and its ability to provide coverage information.
 }
+
+@; ---------------------------------
+@subsection{Configuration Commands}
+
+@defcmd[input]{
+ Selects the input mode used next time that xrepl starts. The @litchar{default}
+ mode tries the other three in order.}
+
+@defcmd[color]{
+ Enables or disables color in expeditor mode.}
 
 @; ---------------------------------
 @subsection{Miscellaneous Commands}
