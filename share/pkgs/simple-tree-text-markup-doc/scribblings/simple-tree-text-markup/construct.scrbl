@@ -1,6 +1,7 @@
 #lang scribble/doc
 
 @(require (for-label (only-in simple-tree-text-markup/data markup? image-markup)
+                     (prefix-in data/ simple-tree-text-markup/data)
                      (except-in simple-tree-text-markup/construct image-markup)
 		     racket) ; srcloc
           scribble/manual)
@@ -68,6 +69,11 @@ This procedure arranges the @racket[markup] arguments horizontally.
 
 @defproc[(vertical [markup markup?] ...) markup?]{
 This procedure arranges the @racket[markup] arguments vertically.
+}
+@defproc[(transform-markup [mappers (listof pair?)]
+                           [markup markup?])
+	 markup?]{
+This is the same as @racketlink[data/transform-markup]{@racketfont{transform-markup}}.
 }
 
 @defproc[(markup-transform-image-data [transform-image-data (any/c . -> . any/c)]

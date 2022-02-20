@@ -27,7 +27,7 @@
 
 (provide/cond-contract
   [tc/funapp
-   (syntax? stx-list? Type? (c:listof tc-results1/c) (c:or/c #f tc-results/c)
+   (syntax? (c:or/c (c:listof syntax?) (c:and/c syntax? stx-list?)) Type? (c:listof tc-results1/c) (c:or/c #f tc-results/c)
             . c:-> . full-tc-results/c)])
 
 ;; macro that abstracts the common structure required to iterate over
@@ -202,26 +202,27 @@
                      (RestDots? (Arrow-rst a))))
        (for/first-valid-inference
            #:in-arrs [a (in-list arrows)]
-         #:arr-match (Arrow: dom rst kws rng)
-         #:function-syntax f-stx
-         #:args-syntax args-stx
-         ;; only try inference if the argument lengths are appropriate
-         ;; and there's no mandatory kw
-         #:infer-when
-         (and (not (ormap Keyword-required? kws))
-              (Arrow-includes-arity? dom rst argtys))
-         ;; Only try to infer the free vars of the rng (which includes the vars
-         ;; in props/objects).
-         #:maybe-inferred-substitution
-         (let ([rng (subst-dom-objs argtys argobjs rng)])
-           (extend-tvars vars
-                         (infer/vararg vars null argtys dom rst rng
-                                       (and expected
-                                            (tc-results->values expected))
-                                       #:objs argobjs)))
-         #:function-type f-type
-         #:args-results args-res
-         #:expected expected)]
+           #:arr-match (Arrow: dom rst kws rng)
+           #:function-syntax f-stx
+           #:args-syntax args-stx
+           ;; only try inference if the argument lengths are appropriate
+           ;; and there's no mandatory kw
+           #:infer-when
+           (and (not (ormap Keyword-required? kws))
+                (Arrow-includes-arity? dom rst argtys))
+           ;; Only try to infer the free vars of the rng (which includes the vars
+           ;; in props/objects).
+           #:maybe-inferred-substitution
+           (begin
+             (let ([rng (subst-dom-objs argtys argobjs rng)])
+               (extend-tvars vars
+                             (infer/vararg vars null argtys dom rst rng
+                                           (and expected
+                                                (tc-results->values expected))
+                                           #:objs argobjs))))
+           #:function-type f-type
+           #:args-results args-res
+           #:expected expected)]
       ;; polymorphic dependent function
       [(Poly: vars (DepFun: raw-dom raw-pre raw-rng))
        (parameterize ([with-refinements? #t])
@@ -258,7 +259,7 @@
       ;; Row polymorphism. For now we do really dumb inference that only works
       ;; in very restricted cases, but is probably enough for most cases in
       ;; the Racket codebase. Eventually this should be extended.
-      [(PolyRow: vars constraints (and f-ty (Fun: arrows)))
+      [(PolyRow: vars (and f-ty (Fun: arrows)) constraints)
        ;; check there are no RestDots
        #:when (not (for/or ([a (in-list arrows)])
                      (RestDots? (Arrow-rst a))))
@@ -295,10 +296,6 @@
               (tc/funapp f-stx args-stx (subst-all substitution f-ty)
                          args-res expected)]
              [else (fail)])]
-      ;; procedural structs
-      [(Struct: _ _ _ (? Fun? proc-ty) _ _ _)
-       (tc/funapp f-stx #`(#,(syntax/loc f-stx dummy) . #,args-stx) proc-ty
-                  (cons (ret f-type) args-res) expected)]
       ;; parameters are functions too
       [(Param: in out)
        (match argtys
@@ -332,6 +329,16 @@
         (string-append "Cannot infer type instantiation for type ~a. Please add "
                        "more type annotations")
         f-type)]
+      [(Intersection: ts^ _)
+       (define li-arr
+         (append-map (match-lambda
+                       [(Fun: (list arrows ...)) arrows]
+                       [_ null])
+                     ts^))
+
+       (if (null? li-arr)
+           (failure-cont)
+           (tc/funapp f-stx args-stx (make-Fun li-arr) args-res expected))]
       [_
        (tc-error/expr
         "Cannot apply expression of type ~a, since it is not a function type"

@@ -490,8 +490,7 @@
     (filter (syntax-parser [t:type-alias #t] [_ #f])
             (syntax->list (hash-ref parse-info 'initializer-body))))
 
-  (define-values (alias-names alias-map) (get-type-alias-info type-aliases))
-  (register-all-type-aliases alias-names alias-map)
+  (register-all-type-aliases type-aliases)
 
   ;; Prop top level expressions into several groups, each processed
   ;; into appropriate data structures
@@ -620,7 +619,7 @@
                                local-private-table private-method-types
                                self-type))
   (do-timestamp "built local tables")
-  
+
   (with-extended-lexical-env
     [#:identifiers lexical-names/top-level
      #:types lexical-types/top-level]
@@ -1632,8 +1631,8 @@
      (make-Poly ns (function->method body self-type))]
     [(PolyDots-names: ns body)
      (make-PolyDots ns (function->method body self-type))]
-    [(PolyRow-names: ns constraints body)
-     (make-PolyRow ns constraints (function->method body self-type))]
+    [(PolyRow-names: ns body constraints)
+     (make-PolyRow ns (function->method body self-type) constraints)]
     [_ (int-err "function->method: ~a" type)]))
 
 ;; method->function : Function -> Function
@@ -1651,8 +1650,8 @@
      (make-Poly ns (method->function body))]
     [(PolyDots-names: ns body)
      (make-PolyDots ns (method->function type))]
-    [(PolyRow-names: ns constraints body)
-     (make-PolyRow ns constraints (method->function type))]
+    [(PolyRow-names: ns body constraints)
+     (make-PolyRow ns (method->function type) constraints)]
     [_ (tc-error/expr #:return -Bottom "expected a function type for method")]))
 
 ;; process-method-syntax : Syntax Type (Option Type) -> Syntax

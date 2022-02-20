@@ -1,6 +1,6 @@
-;; Bulgarian translation of Racket string constants file, version: 1.38
+;; Bulgarian translation of Racket string constants file, version: 1.41
 ;; This file is distributed under the same terms as Racket
-;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020, 2021.
+;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022.
 
 (module bulgarian-string-constants "string-constant-lang.rkt"
   ;;; when translating this constant, substitute name of actual language for `English'
@@ -516,8 +516,8 @@
   (fixup-open-brackets "Автоматична поправка на отварящите квадратни скоби")
   (fixup-close-parens "Автоматична поправка на затварящите кръгли скоби")
   (flash-paren-match "Премигване на съвпадащата скоба")
-  (auto-save-files "Автоматично запазване на файловете")
-  (backup-files "Резервни копия на файловете")
+  (backup-unsaved-files "Резервни копия за незапазените файлове")
+  (first-change-files "Създаване на файлове за първа промяна")
   (map-delete-to-backspace "Клавишът „Backspace“ да отговаря на „Delete“")
   (verify-exit "Питане при спиране на DrRacket")
   (ask-before-changing-format "Питане преди смяна на форма̀та на запазване")
@@ -723,6 +723,7 @@
   (file-dne "Файлът не съществува.")
   (empty-filename "Името на файла трябва да съдържа поне един знак.")
   (that-is-dir-name "Това е име на директория.")
+  (use-platform-specific-file-dialogs "Диалоговият прозорец за файлове да е от операционната система") ;; a preferences option
 
   ;;; raw menu names -- these must match the
   ;;; versions below, once the &s have been stripped.
@@ -928,7 +929,7 @@
   ;;; autosaving
   (error-autosaving "Грешка при автоматичното запазване на „~a“.") ;; ~a will be a filename
   (autosaving-turned-off "Автоматичното запазване е изключено\nдо първото изрично запазване на файла.")
-  (recover-autosave-files-frame-title "Възстановяване на автоматично запазен файл")
+  (recover-autosave-files-frame-title "Възстановяване на файлове")
   (autosave-details "Подробности")
   (autosave-recover "Възстановяване")
   (autosave-unknown-filename "«непознат»")
@@ -970,15 +971,15 @@
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "Автоматично запазен файл:")
+  (autosave-autosave-label: "Резервен файл:")
   (autosave-original-label: "Първоначален файл:")
-  (autosave-autosave-label "Автоматично запазен файл")
+  (autosave-autosave-label "Резервен файл")
   (autosave-original-label "Първоначален файл")
-  (autosave-compare-files "Сравняване на автоматично запазени файлове")
+  (autosave-compare-files "Сравняване на резервни файлове")
 
-  (autosave-show-autosave "Автоматично запазен файл") ;; title of a window showing the autosave file
+  (autosave-show-autosave "Резервен файл") ;; title of a window showing the autosave file
 
-  (autosave-explanation "DrRacket откри автоматично запазени файлове, в които може да има незапазени данни.")
+  (autosave-explanation "DrRacket откри резервни файлове, в които може да има незапазени данни.")
 
   (autosave-recovered! "Възстановен!") ;; status of an autosave file
   (autosave-deleted "Изтрит")          ;; status of an autosave file
@@ -990,7 +991,7 @@
   (autosave-done "Готово")
 
   ;; appears in the file dialog
-  (autosave-restore-to-where? "Избор на място за автоматично запазване на файлове.")
+  (autosave-restore-to-where? "Избор на място за резервни файлове.")
 
   ;;; file modified warning
   (file-has-been-modified
@@ -2098,7 +2099,7 @@
    " съществува.\n\nПробвайте следната команда в прозорец на терминал,"
    " за да създадете директорията:\n"
    "    sudo mkdir /etc/paths.d\n"
-   " пробвайте отново.")
+   " и пробвайте отново.")
   (added-racket/bin-to-path/windows
    "Вече може да ползвате командата „racket“ и други инструменти от"
    " командния ред.\n\nСтандартният"

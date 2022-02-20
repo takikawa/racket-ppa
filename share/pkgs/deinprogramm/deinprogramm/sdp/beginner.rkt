@@ -5,6 +5,7 @@
          deinprogramm/sdp/private/primitives)
 (provide #%app #%top (rename-out (beginner-module-begin #%module-begin)) #%datum #%top-interaction
 	 require lib planet provide
+         only-in except-in prefix-in rename-in combine-in relative-in only-meta-in for-syntax for-template for-label for-meta
          define lambda λ cond if else and or
          define-record define-record-functions
 	 match

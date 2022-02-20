@@ -88,22 +88,7 @@
 
 
 (define (markup-transform-image-data transform-image-data markup)
-  (let recur ((markup  markup))
-    (cond
-      ((string? markup) markup)
-      ((empty-markup? markup) markup)
-      ((horizontal-markup? markup)
-       (horizontal-markup
-        (map recur (horizontal-markup-markups markup))))
-      ((vertical-markup? markup)
-       (vertical-markup
-        (map recur (vertical-markup-markups markup))))
-      ((srcloc-markup? markup)
-       (srcloc-markup (srcloc-markup-srcloc markup)
-                      (recur (srcloc-markup-markup markup))))
-      ((framed-markup? markup)
-       (framed-markup (recur (framed-markup-markup markup))))
-      ((image-markup? markup)
-       (image-markup (transform-image-data (image-markup-data markup))
-                     (recur (image-markup-alt-markup markup))))
-      ((number-markup? markup) markup))))
+  (transform-markup
+   `((,image-markup? . ,(lambda (data alt-markup)
+                          (image-markup (transform-image-data data) alt-markup))))
+   markup))

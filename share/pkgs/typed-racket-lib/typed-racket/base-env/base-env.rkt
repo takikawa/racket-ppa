@@ -1,7 +1,6 @@
 #lang s-exp "env-lang.rkt"
 
 ;; This module defines Typed Racket's main base type environment.
-
 (require
  (for-template
   (except-in racket -> ->* one-of/c class)
@@ -26,7 +25,12 @@
  "base-structs.rkt"
  racket/file
  (only-in racket/private/pre-base new-apply-proc)
- (only-in "../types/abbrev.rkt" [-Boolean B] [-Symbol Sym] -Flat)
+ (only-in "../types/abbrev.rkt" [-Boolean B] [-Symbol Sym] -Flat
+          -Prompt-Tagof
+          -Continuation-Mark-Keyof
+          -CustodianBox
+          -Ephemeron
+          -vec*)
  (only-in "../types/numeric-tower.rkt" [-Number N])
  (only-in (combine-in "../rep/type-rep.rkt"
                       "../rep/values-rep.rkt"
@@ -44,12 +48,7 @@
           -ChannelTop
           -SequenceTop
           -ThreadCellTop
-          make-Ephemeron
-          make-CustodianBox
-          make-HeterogeneousVector
-          make-Continuation-Mark-Keyof
           -Continuation-Mark-KeyTop
-          make-Prompt-Tagof
           -Prompt-TagTop
           make-StructType
           -StructTypeTop
@@ -101,11 +100,11 @@
 [pseudo-random-generator? (make-pred-ty -Pseudo-Random-Generator)]
 [current-pseudo-random-generator (-Param -Pseudo-Random-Generator -Pseudo-Random-Generator)]
 [pseudo-random-generator->vector
- (-> -Pseudo-Random-Generator (make-HeterogeneousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)))]
+ (-> -Pseudo-Random-Generator (-vec* -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt))]
 [vector->pseudo-random-generator
- (-> (make-HeterogeneousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)) -Pseudo-Random-Generator)]
+ (-> (-vec* -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt) -Pseudo-Random-Generator)]
 [vector->pseudo-random-generator!
- (-> -Pseudo-Random-Generator (make-HeterogeneousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)) -Void)]
+ (-> -Pseudo-Random-Generator (-vec* -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt) -Void)]
 
 ;; Section 4.3.2.8 (Number-String Conversions)
 [number->string (->opt N [N] -String)]
@@ -696,6 +695,11 @@
                  (cl->* ((-lst a) Univ . -> . (-opt -Index))
                         ((-lst a) b (-> a b Univ)
                            . -> . (-opt -Index))))]
+[index-where (-poly (a)
+                    ((-lst a)
+                     (-> a Univ)
+                     . -> .
+                     (-opt -Index)))]
 
 [list? (make-pred-ty (-lst Univ))]
 [list (-poly (a) (->* '() a (-lst a)))]
@@ -868,7 +872,9 @@
                          (cl->* (-> (-mpair a b) b -Void)
                                 (-> (-mlst a) (-mlst a) -Void)))]
 [mpair? (make-pred-ty -MPairTop)]
-[mlist (-poly (a) (->* (list) a (-mlst a)))]
+;; mlist is a macro that under the hood uses -mlist, which is annotated in
+;; base-special-env.rkt
+
 [mlength (-poly (a) (-> (-mlst a) -Index))]
 [mreverse! (-poly (a) (-> (-mlst a) (-mlst a)))]
 [mappend (-poly (a) (->* (list) (-mlst a) (-mlst a)))]
@@ -1210,7 +1216,7 @@
                        (make-ListDots a 'a)
                        (-values (list (-lst* b) -Nat -Nat -Nat)))))]
 
-;; Section 4.17.3 (racket/function)
+;; Section 4.18.3 (racket/function)
 [identity (-poly (a) (->acc (list a) a null))]
 [const (-poly (a) (-> a (->* '() Univ a)))]
 [negate (-polydots (a b c d)
@@ -1267,7 +1273,7 @@
 
 [struct-type-property? (make-pred-ty (-struct-property -Bottom #f))]
 [struct-type-property-accessor-procedure? (-> Univ B)]
-[struct-type-property-predicate-procedure? (->opt Univ [(-opt (-struct-property -Bottom))] B)]
+[struct-type-property-predicate-procedure? (->opt Univ [(-opt (-struct-property -Bottom #f))] B)]
 
 ;; Section 5.6 (Structure Utilities)
 [struct->vector (Univ . -> . (-vec Univ))]
@@ -1354,7 +1360,7 @@
 
 ;; Section 10.2.5
 [prop:exn:srclocs (-struct-property (-> -Self (-lst -Srcloc)) #'exn:srclocs?)]
-[exn:srclocs? (-> Univ B : (-has-struct-property prop:exn:srclocs))]
+[exn:srclocs? (make-pred-ty (-has-struct-property #'prop:exn:srclocs))]
 [exn:srclocs-accessor (-> Univ (-lst Univ))] ;TODO
 
 [srcloc->string (-> -Srcloc -String)]
@@ -1369,17 +1375,17 @@
 [call-with-continuation-prompt
  (-polydots (a b d c)
    (cl->*
-    (-> (-> b) (make-Prompt-Tagof b (-> (-> d) d)) (Un b d))
-    (-> (-> b) (make-Prompt-Tagof b (->... '() (c c) d)) (->... '() (c c) d)
+    (-> (-> b) (-Prompt-Tagof b (-> (-> d) d)) (Un b d))
+    (-> (-> b) (-Prompt-Tagof b (->... '() (c c) d)) (->... '() (c c) d)
         (Un b d))
     (-> (-> b) Univ)))]
 [abort-current-continuation
  (-polydots (a b d e c)
    (cl->*
-    (->... (list (make-Prompt-Tagof b (->... '() (c c) d))) (c c) e)
-    (->... (list (make-Prompt-Tagof b (->... '() (c c) ManyUniv))) (c c) e)))]
+    (->... (list (-Prompt-Tagof b (->... '() (c c) d))) (c c) e)
+    (->... (list (-Prompt-Tagof b (->... '() (c c) ManyUniv))) (c c) e)))]
 [make-continuation-prompt-tag
- (-poly (a b) (->opt [Sym] (make-Prompt-Tagof a b)))]
+ (-poly (a b) (->opt [Sym] (-Prompt-Tagof a b)))]
 ;; default-continuation-prompt-tag is defined in "base-contracted.rkt"
 [call-with-current-continuation
  (-polydots (a b c)
@@ -1400,7 +1406,7 @@
    (-> ;; takes a continuation and should return the same
        ;; type as the continuation's input type
        (-> (->... '() (a a) b) (make-ValuesDots '() a 'a))
-       (make-Prompt-Tagof b c)
+       (-Prompt-Tagof b c)
        ;; the continuation's input is the same as the
        ;; return type here
        (make-ValuesDots '() a 'a)))]
@@ -1432,14 +1438,14 @@
 [continuation-mark-set->list
  (-poly (a)
         (cl->*
-         (->opt -Cont-Mark-Set (make-Continuation-Mark-Keyof a)
+         (->opt -Cont-Mark-Set (-Continuation-Mark-Keyof a)
                 [-Prompt-TagTop] (-lst a))
          (->opt -Cont-Mark-Set Univ [-Prompt-TagTop] (-lst Univ))))]
 [continuation-mark-set->list*
  (-poly (a b)
         (cl->*
          (->opt -Cont-Mark-Set
-                (-lst (make-Continuation-Mark-Keyof a))
+                (-lst (-Continuation-Mark-Keyof a))
                 [b -Prompt-TagTop]
                 (-lst (-vec (Un a b))))
          (->opt -Cont-Mark-Set
@@ -1449,9 +1455,9 @@
 [continuation-mark-set-first
  (-poly (a b)
         (cl->*
-         (-> (-opt -Cont-Mark-Set) (make-Continuation-Mark-Keyof a)
+         (-> (-opt -Cont-Mark-Set) (-Continuation-Mark-Keyof a)
              (-opt a))
-         (->opt (-opt -Cont-Mark-Set) (make-Continuation-Mark-Keyof a)
+         (->opt (-opt -Cont-Mark-Set) (-Continuation-Mark-Keyof a)
                 [b -Prompt-TagTop]
                 (Un a b))
          (->opt (-opt -Cont-Mark-Set) Univ [Univ -Prompt-TagTop] Univ)))]
@@ -1460,7 +1466,7 @@
 [continuation-mark-key? (make-pred-ty -Continuation-Mark-KeyTop)]
 [continuation-mark-set? (make-pred-ty -Cont-Mark-Set)]
 [make-continuation-mark-key
- (-poly (a) (->opt [-Symbol] (make-Continuation-Mark-Keyof a)))]
+ (-poly (a) (->opt [-Symbol] (-Continuation-Mark-Keyof a)))]
 [continuation-mark-set->context
  (-> -Cont-Mark-Set (-lst (-pair (-opt Sym) Univ)))] ;TODO add srcloc
 
@@ -1677,12 +1683,11 @@
                    (-opt -Integer)
                    (-opt -Integer)
                    (-opt -Integer))]
-        [srcvec (make-HeterogeneousVector (list
-                                           Univ
-                                           (-opt -Integer)
-                                           (-opt -Integer)
-                                           (-opt -Integer)
-                                           (-opt -Integer)))]
+        [srcvec (-vec* Univ
+                       (-opt -Integer)
+                       (-opt -Integer)
+                       (-opt -Integer)
+                       (-opt -Integer))]
         [srcloc (Un S (-val #f) srclist srcvec)]
         [prop (-opt S)]
         [cert (-opt S)])
@@ -1751,7 +1756,7 @@
  (Ident . ->opt . [(Un -Int (-val #f))] -Symbol)]
 
 ;; Section 12.4
-[set!-transformer? (-> Univ B : (-has-struct-property prop:set!-transformer))]
+[set!-transformer? (make-pred-ty (-has-struct-property #'prop:set!-transformer))]
 [make-set!-transformer (-> (-> (-Syntax Univ) (-Syntax Univ)) Univ)]
 [set!-transformer-procedure (-> Univ (-> (-Syntax Univ) (-Syntax Univ)))]
 [prop:set!-transformer (-struct-property (Un -Nat
@@ -1759,7 +1764,7 @@
                                                    [(-Self (-Syntax Univ)) (-Syntax Univ)]))
                                          #'set!-transformer?)]
 
-[rename-transformer? (-> Univ B : (-has-struct-property prop:rename-transformer))]
+[rename-transformer? (make-pred-ty (-has-struct-property #'prop:rename-transformer))]
 [make-rename-transformer (->opt (-Syntax Sym) [(-> (-Syntax Sym) (-Syntax Sym))] Univ)]
 [rename-transformer-target (-> Univ (-Syntax Sym))]
 [prop:rename-transformer (-struct-property (Un -Nat (-Syntax Sym) (-> -Self (-Syntax Sym)))
@@ -2549,7 +2554,7 @@
                                          (-opt -Integer)))))))))))]
 [module-compiled-language-info
  (-> -Compiled-Module-Expression
-     (-opt (make-HeterogeneousVector (list -Module-Path -Symbol Univ))))]
+     (-opt (-vec* -Module-Path -Symbol Univ)))]
 
 ;; Section 14.4.3
 [dynamic-require
@@ -2574,7 +2579,7 @@
 [module->language-info
  (->opt (Un -Module-Path -Path -Resolved-Module-Path)
         [Univ]
-        (-opt (make-HeterogeneousVector (list -Module-Path -Symbol Univ))))]
+        (-opt (-vec* -Module-Path -Symbol Univ)))]
 
 [module->imports (-> (Un -Module-Path -Resolved-Module-Path -Module-Path-Index)
                      (-lst (-pair (-opt -Integer)
@@ -2635,9 +2640,9 @@
 [custodian-require-memory (-> -Custodian -Nat -Custodian -Void)]
 [custodian-limit-memory (->opt -Custodian -Nat [-Custodian] -Void)]
 
-[make-custodian-box (-poly (a) (-> -Custodian a (make-CustodianBox a)))]
-[custodian-box? (make-pred-ty (-poly (a) (make-CustodianBox a)))]
-[custodian-box-value (-poly (a) (-> (make-CustodianBox a) a))]
+[make-custodian-box (-poly (a) (-> -Custodian a (-CustodianBox a)))]
+[custodian-box? (make-pred-ty (-poly (a) (-CustodianBox a)))]
+[custodian-box-value (-poly (a) (-> (-CustodianBox a) a))]
 
 ;; Section 14.8 (Thread Groups)
 [make-thread-group (->opt [-Thread-Group] -Thread-Group)]
@@ -3129,7 +3134,7 @@
 [log-level/c (make-pred-ty (one-of/c 'none 'fatal 'error 'warning 'info 'debug))]
 [with-intercepted-logging
  (-polydots (a)
-   (->* (list (-> (make-HeterogeneousVector (list -Symbol -String Univ (-opt -Symbol))) Univ)
+   (->* (list (-> (-vec* -Symbol -String Univ (-opt -Symbol)) Univ)
               (-> (make-ValuesDots null a 'a)))
         (-opt (one-of/c 'none 'fatal 'error 'warning 'info 'debug))
         (make-ValuesDots null a 'a)))]
@@ -3218,9 +3223,9 @@
 [weak-box? (make-pred-ty -Weak-BoxTop)]
 
 ;; Section 16.2 (Ephemerons)
-[make-ephemeron (-poly (k v) (-> k v (make-Ephemeron v)))]
-[ephemeron? (make-pred-ty (make-Ephemeron Univ))]
-[ephemeron-value (-poly (v) (-> (make-Ephemeron v) (Un (-val #f) v)))]
+[make-ephemeron (-poly (k v) (-> k v (-Ephemeron v)))]
+[ephemeron? (make-pred-ty (-Ephemeron Univ))]
+[ephemeron-value (-poly (v) (-> (-Ephemeron v) (Un (-val #f) v)))]
 
 ;; Section 16.3 (Wills and Executors)
 [make-will-executor (-> -Will-Executor)]
@@ -3619,4 +3624,4 @@
 ;; MzLib: Legacy Libraries
 [prop:print-converter (-struct-property (-> -Self (-> Univ Univ) Univ)
                                         #'print-converter?)]
-[prop:print-convert-constructor-name (-struct-property -Symbol)]
+[prop:print-convert-constructor-name (-struct-property -Symbol #f)]

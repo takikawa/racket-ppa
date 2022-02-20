@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "errortrace-lib"))) (define pkg-desc "Library for sandboxing Racket programs") (define pkg-authors (quote (eli))) (define version "1.2")))

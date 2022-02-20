@@ -430,6 +430,7 @@
                (lookup-name-sc type typed-side)]
               [else
                (define rv recursive-values)
+               ;; FIXME: need special treatment for type constructors
                (define resolved-name (resolve-once type))
                (register-name-sc type
                                  (λ () (loop resolved-name 'untyped rv))
@@ -603,7 +604,7 @@
        [(? PolyRow?)
         (t->sc/polyrow type fail typed-side recursive-values t->sc)]
 
-       [(Mu: n b)
+       [(Mu: (list n) b)
         (match-define (and n*s (list untyped-n* typed-n* both-n*)) (generate-temporaries (list n n n)))
         (define rv
           (hash-set recursive-values n
@@ -887,6 +888,7 @@
                                 (Values: (list (Result: rngs _ _) ...)))
             first-arrow)
           (define rst (Arrow-rst last-arrow))
+
           ;; kws and rng same for all arrs
           (define last-dom (Arrow-dom last-arrow))
           (define mand-args (map t->sc/neg first-dom))
@@ -1045,13 +1047,13 @@
 
 ;; Generate a contract for a row-polymorphic function type
 (define (t->sc/polyrow type fail typed-side recursive-values t->sc)
-  (match-define (PolyRow: vs constraints body) type)
+  (match-define (PolyRow: vs body constraints) type)
   (if (not (from-untyped? typed-side))
       (let ((recursive-values (for/fold ([rv recursive-values]) ([v vs])
                                 (hash-set rv v (same any/sc)))))
         (extend-row-constraints vs (list constraints)
           (t->sc body #:recursive-values recursive-values)))
-      (match-let ([(PolyRow-names: vs-nm constraints b) type])
+      (match-let ([(PolyRow-names: vs-nm b constraints) type])
         (unless (is-a-function-type? b)
           (fail #:reason "cannot generate contract for non-function polymorphic type"))
         (let ([temporaries (generate-temporaries vs-nm)])
@@ -1244,9 +1246,9 @@
   (define inexact-real-zero/sc (numeric/sc Inexact-Real-Zero (and/c inexact-real? zero?)))
   (define positive-inexact-real/sc (numeric/sc Positive-Inexact-Real (and/c inexact-real? positive?)))
   (define nonnegative-single-flonum/sc (numeric/sc Nonnegative-Single-Flonum (and/c single-flonum? nonnegative?)))
-  (define nonnegative-inexact-real/sc (numeric/sc Nonnegative-Inexact-Real (and/c inexact-real? nonpositive?)))
+  (define nonnegative-inexact-real/sc (numeric/sc Nonnegative-Inexact-Real (and/c inexact-real? nonnegative?)))
   (define negative-inexact-real/sc (numeric/sc Negative-Inexact-Real (and/c inexact-real? negative?)))
-  (define nonpositive-single-flonum/sc (numeric/sc Nonpositive-Single-Flonum (and/c single-flonum? nonnegative?)))
+  (define nonpositive-single-flonum/sc (numeric/sc Nonpositive-Single-Flonum (and/c single-flonum? nonpositive?)))
   (define nonpositive-inexact-real/sc (numeric/sc Nonpositive-Inexact-Real (and/c inexact-real? nonpositive?)))
   (define single-flonum/sc (numeric/sc Single-Flonum single-flonum?))
   (define inexact-real/sc (numeric/sc Inexact-Real inexact-real?))

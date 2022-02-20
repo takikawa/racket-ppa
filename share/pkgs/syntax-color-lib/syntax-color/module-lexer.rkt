@@ -5,7 +5,8 @@
          racket/contract
          racket/contract/option)
 (provide 
- (contract-out [module-lexer lexer/c]))
+ (contract-out [module-lexer lexer/c]
+               [module-lexer* lexer*/c]))
 
 #|
 
@@ -27,7 +28,7 @@ to delegate to the scheme-lexer (in the 'no-lang-line mode).
 |#
 
 
-(define (module-lexer in offset mode)
+(define (do-module-lexer* in offset mode filter-lexer)
   (cond
     [(or (not mode) (eq? mode 'before-lang-line))
      (define lexer-port (peeking-input-port in #:init-position (+ 1 (file-position in))))
@@ -89,7 +90,7 @@ to delegate to the scheme-lexer (in the 'no-lang-line mode).
              (read-byte-or-special in))
            
            (define the-lexer 
-             (let ([raw-lexer (or (get-info 'color-lexer #f) racket-lexer)])
+             (let ([raw-lexer (filter-lexer (or (get-info 'color-lexer #f) racket-lexer*))])
                (if (trusted-lexer? raw-lexer)
                    (waive-option raw-lexer)
                    (exercise-option raw-lexer))))
@@ -136,6 +137,28 @@ to delegate to the scheme-lexer (in the 'no-lang-line mode).
                    (mode in)])
        (values lexeme type data new-token-start new-token-end 0 mode))]))
 
+(define (module-lexer* in offset mode)
+  (do-module-lexer* in offset mode (lambda (lexer) lexer)))
+  
+(define (module-lexer in offset mode)
+  (define (attribs->symbol type)
+    (if (symbol? type)
+        type
+        (hash-ref type 'type 'unknown)))
+  (define-values (lexeme type data start end backup new-mode)
+    (do-module-lexer* in offset mode (lambda (lexer)
+                                       (cond
+                                         [(eq? lexer racket-lexer*) racket-lexer]
+                                         [(not (procedure-arity-includes? lexer 3)) lexer]
+                                         [else
+                                          (procedure-rename
+                                           (lambda (in offset mode)
+                                             (define-values (lexeme type data start end backup new-mode)
+                                               (lexer in offset mode))
+                                             (values lexeme (attribs->symbol type) data start end backup new-mode))
+                                           (object-name lexer))]))))
+  (values lexeme (attribs->symbol type) data start end backup new-mode))
+
 (define (set-port-next-location-from src dest)
   (define-values (line col pos) (port-next-location src))
   (set-port-next-location! dest line col pos))
@@ -144,7 +167,6 @@ to delegate to the scheme-lexer (in the 'no-lang-line mode).
 (define (trusted-lexer? the-lexer)
   (member (object-name the-lexer)
           '(racket-lexer 
-            racket-lexer/status 
-            racket-nobar-lexer/status
+            racket-lexer*
             scribble-inside-lexer
             scribble-lexer)))

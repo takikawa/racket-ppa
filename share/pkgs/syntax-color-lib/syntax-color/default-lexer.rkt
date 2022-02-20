@@ -1,6 +1,6 @@
-(module default-lexer mzscheme
+#lang racket/base
   (require parser-tools/lex
-           (prefix : parser-tools/lex-sre))
+           (prefix-in : parser-tools/lex-sre))
   
   (provide default-lexer)
   
@@ -21,7 +21,4 @@
      ((special-comment)
       (values "" 'comment #f (position-offset start-pos) (position-offset end-pos)))
      ((eof)
-      (values lexeme 'eof #f #f #f)))))
-     
-             
-             
+      (values lexeme 'eof #f #f #f))))

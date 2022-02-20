@@ -580,18 +580,22 @@
                  ((image-markup? markup)
                   (send text insert (image-markup->snip markup style)))
                  ((number-markup? markup)
-                  (send text insert
-                        (number-snip:number->string/snip (number-markup-number markup)
-                                                         #:exact-prefix (number-markup-exact-prefix markup)
-                                                         #:inexact-prefix (number-markup-inexact-prefix markup)
-                                                         #:fraction-view (number-markup-fraction-view markup))))))
+                  (define snip (number-snip:number->string/snip (number-markup-number markup)
+                                                                #:exact-prefix (number-markup-exact-prefix markup)
+                                                                #:inexact-prefix (number-markup-inexact-prefix markup)
+                                                                #:fraction-view (number-markup-fraction-view markup)))
+                  (send snip set-style style)
+                  (send text insert snip))))
                   
              (define (image-markup->snip markup style)
                (let ((data (image-markup-data markup)))
                  (cond
-                   ((is-a? data snip%) data)
+                   ((is-a? data snip%)
+                    (send data set-style style)
+                    data)
                    ((snip-special? data)
                     (define snip (snip-special->snip data))
+                    (send snip set-style style)
                     (if (exn:fail? snip)
                         (markup->snip (image-markup-alt-markup markup) style #f)
                         snip))
@@ -1262,11 +1266,16 @@
                        (λ (v)
                          (let* ([nth (at-peek-n data (- kr 1))]
                                 [nth-pos (cdr nth)])
+                           (define ch (car nth))
                            (set! position
-                                 (if (eof-object? (car nth))
+                                 (if (eof-object? ch)
                                      nth-pos
-                                     (list (car nth-pos)
-                                           (+ 1 (cadr nth-pos))
+                                     (list (if (eqv? ch (char->integer #\newline))
+                                               (add1 (car nth-pos))
+                                               (car nth-pos))
+                                           (if (eqv? ch (char->integer #\newline))
+                                               0
+                                               (+ 1 (cadr nth-pos)))
                                            (+ 1 (caddr nth-pos))))))
                          (set! data (at-dequeue-n data kr))
                          (semaphore-post peeker-sema)

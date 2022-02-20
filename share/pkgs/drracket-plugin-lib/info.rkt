@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define version "1.1") (define deps (quote ("base" "compatibility-lib"))) (define pkg-desc "DrRacket's plugin API") (define pkg-authors (quote (robby)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define version "1.1") (define deps (quote ("base" "compatibility-lib"))) (define pkg-desc "DrRacket's plugin API") (define pkg-authors (quote (robby))) (define license (quote (Apache-2.0 OR MIT)))))

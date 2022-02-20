@@ -576,8 +576,9 @@ the state transitions / contracts are:
      (make-recent-items-slider editor-panel)
      (add-check editor-panel
                 'framework:autosaving-on? 
-                (string-constant auto-save-files))
-     (add-check editor-panel 'framework:backup-files? (string-constant backup-files))
+                (string-constant backup-unsaved-files))
+     (add-check editor-panel 'framework:backup-files? (string-constant first-change-files))
+
      (define auto-load-rb
        (new radio-box%
             [label (string-constant autoload-automatically-reload)]
@@ -600,6 +601,12 @@ the state transitions / contracts are:
                [(ask) 2])))
      (update-auto-load-rb (preferences:get 'framework:autoload))
      (preferences:add-callback 'framework:autoload (λ (p v) (update-auto-load-rb v)))
+
+     (unless (equal? (system-type) 'unix)
+       (define (bool->pref b) (if b 'std 'common))
+       (define (pref->bool p) (equal? p 'std))
+       (add-check editor-panel 'framework:file-dialogs (string-constant use-platform-specific-file-dialogs)
+                  bool->pref pref->bool))
 
      (add-check editor-panel 'framework:show-status-line (string-constant show-status-line))
      ;; does this not belong here?

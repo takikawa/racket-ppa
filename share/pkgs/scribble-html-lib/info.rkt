@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "at-exp-lib" "scribble-text-lib"))) (define pkg-desc "Language for HTML with embedded Racket code") (define pkg-authors (quote (mflatt eli)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "at-exp-lib" "scribble-text-lib"))) (define pkg-desc "Language for HTML with embedded Racket code") (define pkg-authors (quote (mflatt eli))) (define license (quote (Apache-2.0 OR MIT)))))

@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection "ds-store") (define deps (quote ("base"))) (define pkg-desc "implementation (no documentation) part of \"ds-store\"") (define pkg-authors (quote (mflatt)))))
+(module info setup/infotab (#%module-begin (define collection "ds-store") (define deps (quote ("base"))) (define pkg-desc "implementation (no documentation) part of \"ds-store\"") (define pkg-authors (quote (mflatt))) (define license (quote (Apache-2.0 OR MIT)))))

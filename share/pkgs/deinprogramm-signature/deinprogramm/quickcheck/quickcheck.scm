@@ -175,7 +175,7 @@
   (let ((k (caar lis)))
     (if (<= n k)
 	(cdar lis)
-	(pick (- n k) lis))))
+	(pick (- n k) (cdr lis)))))
 
 (define-record-type :arbitrary
   (make-arbitrary generator transformer)
@@ -245,30 +245,40 @@
 		  (lambda (ch gen)
 		    (variant (char->integer ch) gen))))
 
-(define (make-rational a b)
-  (/ a
-     (+ 1 b)))
+(define (make-rational a b c)
+  (+ a
+     (/ a
+	(+ (abs c) 1))))
 
 (define arbitrary-rational
   (make-arbitrary (lift->generator make-rational
 				   (arbitrary-generator arbitrary-integer)
-				   (arbitrary-generator arbitrary-natural))
+				   (arbitrary-generator arbitrary-integer)
+				   (arbitrary-generator arbitrary-integer))
 		  (lambda (r gen)
 		    (coarbitrary arbitrary-integer
 				 (numerator r)
 				 (coarbitrary arbitrary-integer
 					      (denominator r) gen)))))
-
 (define (fraction a b c)
   (+ a
      (exact->inexact (/ b
 			(+ (abs c) 1)))))
 
 (define arbitrary-real
-  (make-arbitrary (lift->generator fraction
-				   (arbitrary-generator arbitrary-integer)
-				   (arbitrary-generator arbitrary-integer)
-				   (arbitrary-generator arbitrary-integer))
+  (make-arbitrary (choose-with-frequencies
+		   (list
+		    (cons 5 (sized
+			     (lambda (n)
+			       (choose-integer (- n) n))))
+		    (cons 4 (lift->generator make-rational
+					     (arbitrary-generator arbitrary-integer)
+					     (arbitrary-generator arbitrary-integer)
+					     (arbitrary-generator arbitrary-integer)))
+		    (cons 1 (lift->generator fraction
+					     (arbitrary-generator arbitrary-integer)
+					     (arbitrary-generator arbitrary-integer)
+					     (arbitrary-generator arbitrary-integer)))))
 		  (lambda (r gen)
 		    (let ((fr (rationalize (inexact->exact r) 1/1000)))
 		      (coarbitrary arbitrary-integer
@@ -443,6 +453,9 @@
 (define nothing
   (make-result '() '() '()))
 
+(define exception-result
+  (make-result #f '() '()))
+
 ; A testable value is one of the following:
 ; - a :property object
 ; - a boolean
@@ -474,7 +487,10 @@
 (define (for-all proc . args)
   (>>= (sequence (map coerce->generator args))
        (lambda (args)
-	 (>>= (coerce->result-generator (apply proc args))
+	 (>>= (with-handlers ((exn:fail?
+			       (lambda (_)
+				 (return exception-result))))
+                (coerce->result-generator (apply proc args)))
 	      (lambda (res)
 		(return (result-add-arguments res
 					      (map (lambda (arg) (cons #f arg)) args))))))))
@@ -482,7 +498,10 @@
 (define (for-all/names proc arg-names args)
   (>>= (sequence (map coerce->generator args))
        (lambda (args)
-	 (>>= (coerce->result-generator (apply proc args))
+	 (>>= (with-handlers ((exn:fail?
+			       (lambda (_)
+				 (return exception-result))))
+                (coerce->result-generator (apply proc args)))
 	      (lambda (res)
 		(return (result-add-arguments res (map cons arg-names args))))))))
 

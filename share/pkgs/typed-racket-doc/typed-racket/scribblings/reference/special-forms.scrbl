@@ -482,25 +482,19 @@ Legacy version of @racket[struct], corresponding to @|define-struct-id|
 from @racketmodname[racket/base].
 @history[#:changed "1.4" @elem{Added the @racket[#:type-name] option.}]}
 
-@defform/subs[#:literals (:)
-(define-struct/exec name-spec ([f : t] ...) [e : proc-t] maybe-type-name)
-([name-spec name-id (code:line (name-id parent))]
- [maybe-type-name (code:line)
-                  (code:line #:type-name type-id)])]{
- Like @racket[define-struct], but defines a procedural structure.
- The procedure @racket[e] is used as the value for @racket[prop:procedure],
- and must have type @racket[proc-t].
-@history[#:changed "1.4" @elem{Added the @racket[#:type-name] option.}]}
-
 @section{Names for Types}
 @defform*[[(define-type name t maybe-omit-def)
            (define-type (name v ...) t maybe-omit-def)]
           #:grammar
           [(maybe-omit-def (code:line #:omit-define-syntaxes) (code:line))]]{
+
 The first form defines @racket[name] as type, with the same meaning as
-@racket[t].  The second form is equivalent to
-@racket[(define-type name (All (v ...) t))].  Type names may
-refer to other types defined in the same or enclosing scopes.
+@racket[t].  The second form defines @racket[name] to be a type
+constructor, whose parameters are @racket[v ...] and body is
+@racket[t]. If no parameters are declared, the defined type
+constructor is equivalent to @racket[(define-type name t
+maybe-omit-def)].  Type names may refer to other types defined in the
+same or enclosing scopes.
 
 @ex[(define-type IntStr (U Integer String))
     (define-type (ListofPairs A) (Listof (Pair A A)))]
@@ -522,11 +516,12 @@ back to itself.
       (define even-lst '(1 2))
       even-lst)]
 
-However, the recursive reference may not occur immediately inside
-the type:
+However, the recursive reference is only allowed when it is passed to a productive
+type constructor:
 
 @ex[(eval:error (define-type Foo Foo))
-    (eval:error (define-type Bar (U Bar False)))]
+    (eval:error (define-type Bar (U Bar False)))
+    (define-type Bar (U (Listof Bar) False))]
 }
 
 @section{Generating Predicates Automatically}
@@ -814,5 +809,47 @@ Performs type checking of forms entered at the read-eval-print loop.  The
 @racket[#%top-interaction] form also prints the type of @racket[form] after
 type checking.}
 
+@section{Special Structure Type Properties}
+@defthing[prop:procedure struct-type-property?]{
+Unlike many other structure type properties, @racket[prop:procedure] does not
+have predefined types for its property values. When a structure is assocatied
+with @racket[prop:procedure], its constructors' return type is an intersection
+type of the structure type and a function type specified by the property
+value.
+}
+
+@ex[
+(struct animal ([a : Number] [b : (-> Number Number)])
+  #:property prop:procedure
+  (struct-field-index b))
+(animal 2 add1)
+(struct plant ([a : Number])
+  #:property prop:procedure
+  (lambda ([me : plant] [a1 : String]) : Number
+    (+ (plant-a me) (string-length a1))))
+(plant 31)
+]
+
+Like for other structure type properties, when a structure's base structure
+specifies a value for @racket[prop:procedure], the structure inherits that
+value if it does not specify its own value.
+
+@ex[
+(struct cat animal ([c : Number]))
+(cat 2 add1 42)
+(struct a-cat cat ())
+(a-cat 2 add1 42)
+]
+
+Function types for procedural structures do not enforce subtyping relations. A
+substructure can be associcated with a different field index for
+@racket[prop:procedure] or a procedure that has a different arity or takes
+different types arguments from from base structures'
+
+@ex[
+(struct b-cat cat ([d : (-> Number String)])
+   #:property prop:procedure (struct-field-index d))
+(b-cat 2 add1 42 number->string)
+]
 
 @(close-eval the-eval)

@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("gui-lib" "gui-doc"))) (define implies (quote ("gui-lib" "gui-doc"))) (define pkg-desc "Graphical user interface toolkit") (define pkg-authors (quote (mflatt robby)))))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("gui-lib" "gui-doc"))) (define implies (quote ("gui-lib" "gui-doc"))) (define pkg-desc "Graphical user interface toolkit") (define pkg-authors (quote (mflatt robby))) (define license (quote (Apache-2.0 OR MIT)))))

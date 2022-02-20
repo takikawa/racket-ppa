@@ -30,7 +30,7 @@
 (begin-for-syntax
   (lazy-require [syntax/struct (build-struct-names)]))
 
-(provide define-typed-struct -struct define-typed-struct/exec dtsi* dtsi/exec*
+(provide define-typed-struct -struct define-typed-struct/exec dtsi*
          define-type-alias define-new-subtype
          (for-syntax type-name-error))
 
@@ -114,13 +114,9 @@
   (syntax-parse stx #:literals (:)
     [(_ nm:struct-name ((~describe "field specification" [fld:optionally-annotated-name]) ...)
         [proc : proc-ty] (~optional (~seq #:type-name type:id)))
-     (with-syntax*
-      ([type (or (attribute type) #'nm.name)]
-       [proc* (with-type* #'proc #'proc-ty)]
-       [d-s (ignore-some (syntax/loc stx (define-struct nm (fld.name ...)
-                                           #:property prop:procedure proc*)))]
-       [dtsi (quasisyntax/loc stx (dtsi/exec* () nm type (fld ...) proc-ty))])
-       #'(begin d-s dtsi))]))
+     (with-syntax* ([type (or (attribute type) #'nm.name)]
+                    [proc* (with-type* #'proc #'proc-ty)])
+       #'(define-typed-struct nm (fld ...) #:type-name type #:property prop:procedure proc*))]))
 
 (define-for-syntax (mk-maybe-type-name-def stx name type-name si sname-is-constr?)
   (cond
@@ -155,21 +151,6 @@
                                         (not (attribute rst.maker))
                                         (free-identifier=? (attribute rst.maker) #'nm.name))
                                     #t)))
-
-     #`(begin #,(internal def)
-              maybe-type-name-def)]))
-
-
-(define-syntax (dtsi/exec* stx)
-  (syntax-parse stx
-    [(_ (vars:id ...) nm:dtsi-struct-name type-name:id . rst)
-     (define def
-       (quasisyntax/loc stx
-         (define-typed-struct/exec-internal
-          #,(struct-info-property #'nm (attribute nm.value)) type-name . rst)))
-
-     (define/with-syntax maybe-type-name-def
-       (mk-maybe-type-name-def stx #'nm.name #'type-name (attribute nm.value) #f))
 
      #`(begin #,(internal def)
               maybe-type-name-def)]))
@@ -212,10 +193,10 @@
                                             (list #'#:property prop))))
                            #'())])
        (with-syntax* ([type (or (attribute opts.type) #'nm.name)]
-                      [d-s (syntax-property (ignore (quasisyntax/loc stx
-                                                      (struct #,@(attribute nm.new-spec) (fs.fld ...)
-                                                        . opts.untyped)))
-                                            'tc-struct #'type)]
+                      [d-s (struct-type-property (ignore (quasisyntax/loc stx
+                                                           (struct #,@(attribute nm.new-spec) (fs.fld ...)
+                                                             . opts.untyped)))
+                                                 #'type)]
                       [prop-vals (quasisyntax/loc stx
                                    (define prop-val-li (list #,@(attribute opts.prop-val))))]
                       [dtsi (quasisyntax/loc stx
@@ -231,33 +212,27 @@
 
 ;; this has to live here because it's used below
 (define-syntax (define-type-alias stx)
-  (define-syntax-class all-vars
-    #:literals (All)
-    #:attributes (poly-vars)
-    (pattern (All (arg:id ...) rest)
-             #:with poly-vars #'(arg ...))
-    (pattern type:expr #:with poly-vars #'()))
-
   (define-splicing-syntax-class omit-define-syntaxes
     #:attributes (omit)
     (pattern #:omit-define-syntaxes #:attr omit #t)
     (pattern (~seq) #:attr omit #f))
 
-  (define-splicing-syntax-class type-alias-full
-     #:attributes (tname type poly-vars omit)
-     (pattern (~seq tname:id (~and type:expr :all-vars) :omit-define-syntaxes))
-     (pattern (~seq (tname:id arg:id ...) body:expr :omit-define-syntaxes)
-       #:with poly-vars #'(arg ...)
-       #:with type (syntax/loc #'body (All (arg ...) body))))
+  (define-splicing-syntax-class type-abbrev
+     #:attributes (tname body omit params)
+    (pattern (~seq tname:id (~and body:expr) :omit-define-syntaxes)
+             #:with params #'())
+    (pattern (~seq (tname:id arg:id ...) body:expr :omit-define-syntaxes)
+             #:with params #'(arg ...)))
+
 
   (syntax-parse stx
-    [(_ :type-alias-full)
+    [(_ :type-abbrev)
      #`(begin
          #,(if (not (attribute omit))
                (ignore (syntax/loc stx (define-syntax tname type-name-error)))
                #'(begin))
          #,(internal (syntax/loc stx
-                       (define-type-alias-internal tname type poly-vars))))]))
+                       (define-type-alias-internal tname body params))))]))
 
 (define-syntax define-new-subtype
   (lambda (stx)

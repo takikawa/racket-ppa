@@ -1794,9 +1794,13 @@
   ;; Syntax Identifier -> Expression
   ;; Produces an expression which raises an error reporting unfinished code.
   (define (dots-error stx name)
-    (quasisyntax/loc stx
-      (error (quote (unsyntax name))
-             "expected a finished expression, but found a template")))
+    (stepper-syntax-property
+     (stepper-syntax-property
+      (quasisyntax/loc stx
+        (error (quote (unsyntax name))
+               "expected a finished expression, but found a template"))
+      'stepper-black-box-expr stx)
+     'stepper-skip-completely #t))
 
   ;; Expression -> Expression
   ;; Transforms unfinished code (... and the like) to code
@@ -1807,7 +1811,9 @@
        
        ;; this ensures that coverage happens; it lifts a constant
        ;; expression to the top level, but one that has the source location of the dots expression
-       (syntax-local-lift-expression (datum->syntax #'here 1 stx))
+       (syntax-local-lift-expression (stepper-syntax-property
+                                      (datum->syntax #'here 1 stx)
+                                      'stepper-hide-completed #t))
        
        (syntax-case stx (set!)
          [(set! form expr) (dots-error stx (syntax form))]
@@ -1816,9 +1822,13 @@
 	  (quasisyntax/loc stx
             (begin
               #,(dots-error stx (syntax form))
-	      (quote-syntax
-		#,(syntax-property #'rest 'identifiers-as-disappeared-uses? #t)
-		 #:local)))
+	      #,(stepper-syntax-property
+                 (quasisyntax/loc stx
+                   (quote-syntax
+                    #,(syntax-property #'rest 'identifiers-as-disappeared-uses? #t)
+                    #:local))
+                 'stepper-skip-completely
+                 #t)))
 
 	  ;; The solution below enforces that `rest` is syntactically
 	  ;; correct, and as a result, it displays _correct_ binding arrows.

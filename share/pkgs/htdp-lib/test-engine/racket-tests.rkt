@@ -10,7 +10,8 @@
          check-satisfied ;; syntax : (check-satisfied <expression> <expression>)
          ;; re-exports from test-engine/syntax
          test-execute test-silence
-         test) 
+         test
+         test-engine-is-using-error-display-handler?) 
 
 (require lang/private/teachprims
          racket/match
@@ -20,7 +21,10 @@
                      #;"requiring from" lang/private/firstorder #;"avoids load cycle")
          test-engine/test-engine
          (only-in test-engine/test-markup get-rewritten-error-message)
-         test-engine/syntax)
+         test-engine/syntax
+         racket/class
+         simple-tree-text-markup/construct
+         simple-tree-text-markup/port)
 
 (define INEXACT-NUMBERS-FMT
   "check-expect cannot compare inexact numbers. Try (check-within test ~a range).")
@@ -70,9 +74,31 @@
             (if (and (not (= found 0)) fn-is-large) "only " "")
             (if (= found 0) "none" found))))
 
+; The stepper needs this: it binds error-display-handler to get notified of an error.
+; However, we call (error-display-handler) just to generate markup, and the stepper
+; needs to ignore that.
+(define test-engine-is-using-error-display-handler? (make-parameter #f))
+
+(define (exn->markup exn)
+  (let-values (([port get-markup] (make-markup-output-port/unsafe (lambda (special)
+                                                                    (cond
+                                                                      [(and (object? special)
+                                                                            (is-a? special srclocs-special<%>)
+                                                                            (send special get-srclocs))
+                                                                       => (lambda (srclocs)
+                                                                            (if (and (pair? srclocs)
+                                                                                     (srcloc? (car srclocs)))
+                                                                                (srcloc-markup (car srclocs) (srcloc->string (car srclocs)))
+                                                                                empty-markup))]
+                                                                      [else empty-markup])))))
+    (parameterize ([current-error-port port]
+                   [test-engine-is-using-error-display-handler? #t])
+        ((error-display-handler) (exn-message exn) exn)
+        (get-markup))))
+
 (define (make-exn->unexpected-error src expected)
   (lambda (exn)
-    (unexpected-error src expected exn)))
+    (unexpected-error/markup src expected exn (exn->markup exn))))
 
 (define-syntax (check-expect stx)
   (check-context! 'check-expect CHECK-EXPECT-DEFN-STR stx)
@@ -179,7 +205,7 @@
           (satisfied-failed src actual name)]
          [else #t])))
    (lambda (exn)
-     (unsatisfied-error src name exn))))
+     (unsatisfied-error/markup src name exn (exn->markup exn)))))
 
 (define-syntax (check-within stx)
   (check-context! 'check-within CHECK-WITHIN-DEFN-STR stx)
@@ -218,12 +244,12 @@
   (execute-test
    src
    (lambda ()
-     (with-handlers ([exn?
+     (with-handlers ([exn:fail?
                       (lambda (exn)
                         (let ((msg (get-rewritten-error-message exn)))
                           (if (equal? msg error)
                               #t
-                              (incorrect-error src error exn))))])
+                              (incorrect-error/markup src error exn (exn->markup exn)))))])
        (let ([actual (test)])
          (expected-error src error actual))))
    (make-exn->unexpected-error src error))) ; probably can't happen
@@ -232,7 +258,7 @@
   (execute-test
    src
    (lambda ()
-     (with-handlers ([exn?
+     (with-handlers ([exn:fail?
                       (lambda (exn) #t)])
        (let ([actual (test)])
          (expected-error src #f actual))))
