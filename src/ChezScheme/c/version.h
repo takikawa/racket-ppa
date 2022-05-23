@@ -31,12 +31,21 @@
 # define FLUSHCACHE
 #endif
 
-#if (defined(__arm__) || defined(__arm64__) || defined(__aarch64__))
+#if (defined(__arm__) || defined(__arm64__) || defined(__aarch64__) || defined(_M_ARM64))
 # define FLUSHCACHE
 #endif
 
-#if (machine_type == machine_type_pb)
+#ifdef PORTABLE_BYTECODE
 # undef FLUSHCACHE
+# ifdef PORTABLE_BYTECODE_BIGENDIAN
+#  if fasl_endianness_is_little
+#   define PORTABLE_BYTECODE_SWAPENDIAN
+#  endif
+# else
+#  if fasl_endianness_is_big
+#   define PORTABLE_BYTECODE_SWAPENDIAN
+#  endif
+# endif
 #else
 # undef PORTABLE_BYTECODE_BIGENDIAN
 #endif
@@ -78,7 +87,6 @@ typedef int tputsputcchar;
 # define NOFILE 256
 # define NO_USELOCALE
 #endif
-#define UNUSED __attribute__((__unused__))
 #endif
 
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
@@ -106,7 +114,6 @@ typedef int tputsputcchar;
 #define NSECCTIME(sb) (sb).st_ctimespec.tv_nsec
 #define NSECMTIME(sb) (sb).st_mtimespec.tv_nsec
 #define ICONV_INBUF_TYPE char **
-#define UNUSED __attribute__((__unused__))
 #define USE_OSSP_UUID
 #endif
 
@@ -139,7 +146,6 @@ typedef int tputsputcchar;
 #define NSECCTIME(sb) (sb).st_ctimespec.tv_nsec
 #define NSECMTIME(sb) (sb).st_mtimespec.tv_nsec
 #define ICONV_INBUF_TYPE const char **
-#define UNUSED __attribute__((__unused__))
 #define USE_NETBSD_UUID
 #define USE_MBRTOWC_L
 #endif
@@ -159,7 +165,9 @@ typedef int tputsputcchar;
 typedef char *memcpy_t;
 struct timespec;
 #ifndef __MINGW32__
-# if defined(_WIN64)
+# if defined(_M_ARM64) && !defined(PORTABLE_BYTECODE)
+#  define HAND_CODED_SETJMP_SIZE 32
+# elif defined(_WIN64) && !defined(PORTABLE_BYTECODE)
 #  define HAND_CODED_SETJMP_SIZE 32
 # else
 #  define _setjmp setjmp
@@ -204,11 +212,6 @@ struct timespec;
 #define NSECMTIME(sb) 0
 #define ICONV_INBUF_TYPE char **
 struct timespec;
-#if defined(__MINGW32__)
-# define UNUSED __attribute__((__unused__))
-#else
-# define UNUSED
-#endif
 #if defined(__MINGW32__) && (machine_type == machine_type_ti3nt || machine_type == machine_type_i3nt)
 #define time_t __time64_t
 #define GET_TIME _time64
@@ -241,7 +244,6 @@ typedef int tputsputcchar;
 #define NSECCTIME(sb) (sb).st_ctimespec.tv_nsec
 #define NSECMTIME(sb) (sb).st_mtimespec.tv_nsec
 #define ICONV_INBUF_TYPE char **
-#define UNUSED __attribute__((__unused__))
 #define USE_OSSP_UUID
 #endif
 
@@ -291,7 +293,6 @@ typedef int tputsputcchar;
 #define NSECCTIME(sb) (sb).st_ctimespec.tv_nsec
 #define NSECMTIME(sb) (sb).st_mtimespec.tv_nsec
 #define ICONV_INBUF_TYPE char **
-#define UNUSED __attribute__((__unused__))
 #endif
 
 #if defined(__QNX__)
@@ -320,7 +321,6 @@ typedef int tputsputcchar;
 #define NSECMTIME(sb) 0
 #define ICONV_INBUF_TYPE char **
 #define NOFILE 256
-#define UNUSED
 #endif
 
 #if defined(sun)
@@ -352,7 +352,40 @@ typedef char tputsputcchar;
 #define NSECCTIME(sb) (sb).st_ctim.tv_nsec
 #define NSECMTIME(sb) (sb).st_mtim.tv_nsec
 #define ICONV_INBUF_TYPE const char **
-#define UNUSED __attribute__((__unused__))
+#endif
+
+#if defined(__EMSCRIPTEN__)
+#define USE_MALLOC
+#define GETPAGESIZE() 4096
+#define NOBLOCK O_NONBLOCK
+#define IEEE_DOUBLE
+#define LDEXP
+#define ARCHYPERBOLIC
+typedef char *memcpy_t;
+#define MAKE_NAN(x) { x = 0.0; x = x / x; }
+#define GETWD(x) getcwd((x),PATH_MAX)
+typedef int tputsputcchar;
+#define DIRMARKERP(c) ((c) == '/')
+#define LSEEK lseek64
+#define OFF_T off64_t
+#define _LARGEFILE64_SOURCE
+#define SECATIME(sb) (sb).st_atim.tv_sec
+#define SECCTIME(sb) (sb).st_ctim.tv_sec
+#define SECMTIME(sb) (sb).st_mtim.tv_sec
+#define NSECATIME(sb) (sb).st_atim.tv_nsec
+#define NSECCTIME(sb) (sb).st_ctim.tv_nsec
+#define NSECMTIME(sb) (sb).st_mtim.tv_nsec
+#define ICONV_INBUF_TYPE char **
+#define UNUSED_SUB_INDEX , UNUSED int sub_index
+#endif
+
+/*****************************************/
+/* Compilers                             */
+
+#if defined(__GNUC__)
+# define UNUSED __attribute__((__unused__))
+#else
+# define UNUSED
 #endif
 
 /*****************************************/
@@ -423,6 +456,10 @@ typedef char tputsputcchar;
 # define WRITE write
 #endif
 
+#ifdef PORTABLE_BYTECODE
+# undef WRITE_XOR_EXECUTE_CODE
+#endif
+
 #ifndef S_PROT_CODE
 # ifdef WRITE_XOR_EXECUTE_CODE
 #  define S_PROT_CODE (PROT_WRITE | PROT_READ)
@@ -451,6 +488,11 @@ typedef char tputsputcchar;
 # define NO_THREADS_UNUSED /* empty */
 #else
 # define NO_THREADS_UNUSED UNUSED
+#endif
+
+
+#ifndef UNUSED_SUB_INDEX
+# define UNUSED_SUB_INDEX /* empty */
 #endif
 
 #if defined(__has_feature)

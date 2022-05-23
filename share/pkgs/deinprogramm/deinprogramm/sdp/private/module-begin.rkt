@@ -12,7 +12,7 @@
 	 (for-syntax syntax/kerncase)
 	 (for-syntax racket/struct-info))
 
-(require (only-in test-engine/syntax test))
+(require (only-in test-engine/syntax test test-display-results!))
 
 (define-syntax (print-results stx)
   (syntax-case stx ()
@@ -139,6 +139,11 @@
            ;; the module-expansion machinery can be used to handle
            ;; requires, etc.:
            #`(#%plain-module-begin
+              (let ((handle (uncaught-exception-handler)))
+                (uncaught-exception-handler
+                 (lambda (exn)
+                   (test-display-results!)
+                   (handle exn))))
               (module-continue (e1 ...) () ())
               (module configure-runtime racket/base
                 (require deinprogramm/sdp/private/runtime)

@@ -59,3 +59,20 @@
 
 @(define srfi-std (style #f (list (install-resource "srfi-std"))))
 
+@(define srfi-license-history-url
+   ;; explains the "historical reasons" for the restrictive license on SRFI 5
+   "https://srfi-email.schemers.org/srfi-announce/msg/2652023/")
+@(define srfi-5-std-taglet "srfi-5-std")
+@(define srfi-5-license-taglet "srfi-5-std-license")
+
+@(define (racket-license-link . args)
+   ;; FIXME why does this not work?
+   #;
+   (apply seclink "License" #:doc '(lib "scribblings/main/license.scrbl") args)
+   (define (link base)
+     (apply hyperlink (string-append base "license/index.html") args))
+   (cond-element
+    [(or latex text)
+     (link "https://docs.racket-lang.org/")]
+    [else
+     (link "../")]))

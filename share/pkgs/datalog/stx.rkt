@@ -10,7 +10,8 @@
          datalog/eval)
 
 (begin-for-syntax
-  (define (datalog-variable-string? s)
+  (define (datalog-variable-symbol? sym)
+    (define s (symbol->string sym))
     (and (< 0 (string-length s))
          (char-upper-case? (string-ref s 0)))))
 
@@ -65,7 +66,7 @@
          ...))]))
 
 (define-syntax (datalog-stmt stx)
-  (syntax-parse 
+  (syntax-parse
    stx
    #:literals (! ~ ?)
    [(_ (~and tstx (! c)))
@@ -79,7 +80,7 @@
       (query #,(srcloc-list #'tstx) (datalog-literal/ref l)))]))
 
 (define-syntax (datalog-stmt-var-selector stx)
-  (syntax-parse 
+  (syntax-parse
    stx
    #:literals (! ~ ?)
    [(_ (~and tstx (! c)))
@@ -90,38 +91,36 @@
     (quasisyntax/loc #'tstx (datalog-literal-var-selector l))]))
 
 (define-syntax (datalog-clause stx)
-  (syntax-parse 
+  (syntax-parse
    stx
    #:literals (:-)
    [(_ (~and tstx (:- head body ...)))
-    (local [(define (datalog-literal-variables stx)
-              (syntax-parse 
-               stx
-               #:literals (:-)
-               [sym:id
-                empty]
-               [(~and tstx (sym:id arg ... :- ans ...))
-                (append-map datalog-term-variables
-                            (syntax->list #'(arg ... ans ...)))]
-               [(~and tstx (sym:id e ...))
-                (append-map datalog-term-variables
-                            (syntax->list #'(e ...)))]))
-            (define (datalog-term-variables stx)
-              (syntax-parse 
-               stx
-               [sym:id
-                (cond
-                  [(identifier-binding #'sym 0)
-                   empty]
-                  [(datalog-variable-string? (symbol->string (syntax->datum #'sym)))
-                   (list #'sym)]
-                  [else
-                   empty])]
-               [sym:expr
-                empty]))
+    (local [(define datalog-literal-variables
+              (let ()
+                (define parser
+                  (syntax-parser
+                    #:literals (:-)
+                    [sym:id empty]
+                    [(~and tstx (sym:id arg ... :- ans ...))
+                     #'(arg ... ans ...)]
+                    [(~and tstx (sym:id e ...))
+                     #'(e ...)]))
+
+                (λ stx*
+                  (for*/fold ([vars '()]
+                              #:result (remove-duplicates vars bound-identifier=?))
+                             ([stx0 (in-list stx*)]
+                              [stx  (in-list (syntax->list (parser stx0)))])
+                    (if (syntax-parse stx
+                          [sym:id
+                           (and
+                            (not (identifier-binding #'sym 0))
+                            (datalog-variable-symbol? (syntax->datum #'sym)))]
+                          [sym:expr #f])
+                        (cons stx vars)
+                        vars)))))
             (define head-vars (datalog-literal-variables #'head))
-            (define body-vars 
-              (append-map datalog-literal-variables (syntax->list #'(body ...))))
+            (define body-vars (apply datalog-literal-variables (syntax->list #'(body ...))))
             (define body-vars-in-head
               (filter
                (λ (bv)
@@ -135,7 +134,7 @@
       (syntax-local-lift-expression
        fake-lam))
     (quasisyntax/loc #'tstx
-      (clause #,(srcloc-list #'tstx) (datalog-literal/bind head) 
+      (clause #,(srcloc-list #'tstx) (datalog-literal/bind head)
               (list (datalog-literal/ref body) ...)))]
    [(_ e)
     (quasisyntax/loc #'e
@@ -154,11 +153,11 @@
              #:attr ref #'sym
              #:attr val #'sym))
   (define (datalog-literal/b stx binding?)
-    (syntax-parse 
+    (syntax-parse
         stx
       #:literals (:-)
       [(_ sym:table-id)
-       (syntax-property 
+       (syntax-property
         (quasisyntax/loc #'sym
           (literal #,(srcloc-list #'sym) sym.ref empty))
         (if binding? 'disappeared-binding 'disappeared-use)
@@ -171,20 +170,20 @@
       [(_ (~and tstx (sym:table-id e ...)))
        (syntax-property
         (quasisyntax/loc #'tstx
-          (literal #,(srcloc-list #'tstx) sym.ref 
+          (literal #,(srcloc-list #'tstx) sym.ref
                    (list (datalog-term e)
                          ...)))
         (if binding? 'disappeared-binding 'disappeared-use)
         (syntax-local-introduce #'sym))])))
 
 (define-syntax (datalog-literal-var-selector stx)
-  (syntax-parse 
+  (syntax-parse
    stx
    #:literals (:-)
    [(_ sym:table-id)
     (quasisyntax/loc #'sym (λ (l) (hasheq)))]
    [(_ (~and tstx (sym:table-id arg ... :- ans ...)))
-    (quasisyntax/loc #'tstx 
+    (quasisyntax/loc #'tstx
       (match-lambda
         [(external _srcloc _predsym _pred args anss)
          (terms->hasheq (list (datalog-term arg) ...
@@ -206,7 +205,7 @@
         h)))
 
 (define-syntax (datalog-term stx)
-  (syntax-parse 
+  (syntax-parse
    stx
    #:literals (unsyntax)
    [(_ sym:id)
@@ -214,7 +213,7 @@
       [(identifier-binding #'sym 0)
        (quasisyntax/loc #'sym
          (constant #,(srcloc-list #'sym) sym))]
-      [(datalog-variable-string? (symbol->string (syntax->datum #'sym)))
+      [(datalog-variable-symbol? (syntax->datum #'sym))
        (quasisyntax/loc #'sym
          (variable #,(srcloc-list #'sym) 'sym))]
       [else

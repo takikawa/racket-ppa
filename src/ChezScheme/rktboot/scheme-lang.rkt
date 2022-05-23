@@ -334,6 +334,7 @@
          priminfo-libraries
          $c-bufsiz
          $foreign-procedure
+         $separator-character
          make-guardian
          $lambda/lift-barrier)
 
@@ -705,6 +706,7 @@
            [(prelex-sticky-mask) prelex-sticky-mask]
            [(prelex-is-mask) prelex-is-mask]
            [(code-flag-lift-barrier) code-flag-lift-barrier]
+           [(machine-type-name) `(quote ,machine-type-name)]
            [else (error 'constant "unknown: ~s" #'id)])]))
 
 (define $target-machine (make-parameter (string->symbol target-machine)))
@@ -1280,6 +1282,11 @@
 (define-syntax ($foreign-procedure stx)
   (syntax-case stx ()
     [(_ _ name . _) #'name]))
+
+(define ($separator-character)
+  (if (eq? (system-type) 'windows)
+      #\;
+      #\:))
 
 (define (make-guardian)
   (case-lambda

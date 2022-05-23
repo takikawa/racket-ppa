@@ -1330,6 +1330,7 @@ enum {
   MZCONFIG_ERROR_DISPLAY_HANDLER,
   MZCONFIG_ERROR_PRINT_VALUE_HANDLER,
   MZCONFIG_ERROR_PRINT_SYNTAX_HANDLER,
+  MZCONFIG_ERROR_MESSAGE_ADJUSTER,
 
   MZCONFIG_EXIT_HANDLER,
 
@@ -1369,6 +1370,7 @@ enum {
   MZCONFIG_USE_JIT,
   MZCONFIG_DISALLOW_INLINE,
   MZCONFIG_COMPILE_TARGET_MACHINE,
+  MZCONFIG_COMPILE_REALM,
 
   MZCONFIG_CUSTODIAN,
   MZCONFIG_INSPECTOR,
@@ -1948,9 +1950,13 @@ MZ_EXTERN void scheme_set_dll_procs(scheme_dll_open_proc,
                                     scheme_dll_close_proc);
 #endif
 
+MZ_EXTERN Scheme_Object *scheme_read_installation_config_table(Scheme_Env *global_env);
 MZ_EXTERN void scheme_init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs);
 MZ_EXTERN void scheme_init_collection_paths_post(Scheme_Env *global_env, Scheme_Object *extra_dirs, Scheme_Object *extra_post_dirs);
+MZ_EXTERN void scheme_init_collection_paths_post_config(Scheme_Env *global_env, Scheme_Object *extra_dirs, Scheme_Object *extra_post_dirs,
+                                                        Scheme_Object *config_table);
 MZ_EXTERN void scheme_init_compiled_roots(Scheme_Env *global_env, const char *paths);
+MZ_EXTERN void scheme_init_compiled_roots_config(Scheme_Env *global_env, const char *paths, Scheme_Object *config_table);
 
 MZ_EXTERN void scheme_seal_parameters();
 

@@ -18,7 +18,7 @@
 (provide-and-document
  procedures
  (all-from-except vanilla: deinprogramm/sdp/private/primitives procedures
-		  quote eq? equal?
+		  quote eq?
 		  set!
 		  symbol? symbol=? string->symbol symbol->string
 		  apply))

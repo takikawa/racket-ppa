@@ -48,7 +48,9 @@
 (define (init-screen in out)
   (define in-fd (unsafe-port->file-descriptor in))
   (define out-fd (unsafe-port->file-descriptor out))
-  (and (init-term in-fd out-fd)
+  (and in-fd
+       out-fd
+       (init-term in-fd out-fd)
        (begin
          (set! cursor-col 0)
          (set! the-unread-char #f)

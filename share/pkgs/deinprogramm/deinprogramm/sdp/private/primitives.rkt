@@ -97,7 +97,7 @@
   (number? (any -> boolean)
 	   "feststellen, ob ein Wert eine Zahl ist")
 
-  (= (number number number ... -> boolean)
+  ((sdp-= =) (number number number ... -> boolean)
      "Zahlen auf Gleichheit testen")
   (< (real real real ... -> boolean)
      "Zahlen auf kleiner-als testen")
@@ -253,7 +253,10 @@
   (true? (any -> boolean)
 	 "feststellen, ob ein Wert #t ist")
   (false? (any -> boolean)
-	  "feststellen, ob ein Wert #f ist"))
+	  "feststellen, ob ein Wert #f ist")
+
+  ((sdp-equal? equal?) (any any -> boolean)
+          "feststellen, ob zwei Werte gleich sind"))
 
  ("Listen"
   (empty list "die leere Liste")
@@ -297,7 +300,7 @@
   (string? (any -> boolean)
 	   "feststellen, ob ein Wert eine Zeichenkette ist")
 
-  (string=? (string string string ... -> boolean)
+  ((sdp-string=? string=?) (string string string ... -> boolean)
 	    "Zeichenketten auf Gleichheit testen")
   (string<? (string string string ... -> boolean)
 	    "Zeichenketten lexikografisch auf kleiner-als testen")
@@ -333,8 +336,6 @@
  ("Verschiedenes"
   (signature? (any -> boolean)
 	      "feststellen, ob ein Wert eine Signatur ist")
-  (equal? (%a %b -> boolean)
-	  "zwei Werte auf Gleichheit testen")
   (eq? (%a %b -> boolean)
        "zwei Werte auf Selbheit testen")
   ((sdp-write-string write-string) (string -> unspecific)
@@ -903,6 +904,11 @@
     (verify-boolean b 'not)
     (not b)))
 
+; accepts only two arguments instead of arbitrarily many
+(define-teach sdp equal?
+  (lambda (a b)
+    (equal? a b)))
+
 (define (boolean=? a b)
   (verify-boolean a 'boolean=?)
   (verify-boolean b 'boolean=?)
@@ -917,10 +923,18 @@
 	 (format "~a: Wert ist kein Symbol: ~e" where b))
 	(current-continuation-marks)))))
 
+(define-teach sdp string=?
+  (lambda (a b . args)
+    (apply string=? a b args)))
+
 (define (symbol=? a b)
   (verify-symbol a 'symbol=?)
   (verify-symbol b 'symbol=?)
   (eq? a b))
+
+(define-teach sdp =
+  (lambda (a b . args)
+    (apply = a b args)))
 
 (define-syntax (sdp-app stx)
   (define (raise-operator-error no-op expr)
@@ -1233,7 +1247,7 @@
 
 (define-syntax (match stx)
   (syntax-parse stx
-    ((_ ?case:expr (?pattern0 ?body0:expr) (?pattern ?body:expr) ...)
+    ((_ ?case:expr (?pattern0 ?def0 ... ?body0:expr) (?pattern ?def ... ?body:expr) ...)
      (let ()
        (define (pattern-variables pat)
 	 (syntax-case pat (empty sdp-cons list quote ...)
@@ -1266,8 +1280,8 @@
 	       (loop (cdr vars))))))
        (for-each check (syntax->list #'(?pattern0 ?pattern ...)))
        #'(let* ((val ?case)
-		(nomatch (lambda () (match val (?pattern ?body) ...))))
-	   (match-helper val ?pattern0 ?body0 (nomatch)))))
+		(nomatch (lambda () (match val (?pattern ?def ... ?body) ...))))
+	   (match-helper val ?pattern0 (let () ?def0 ... ?body0) (nomatch)))))
     ((_ ?case:expr)
      (syntax/loc stx (error 'match "keiner der Zweige passte")))))
 
