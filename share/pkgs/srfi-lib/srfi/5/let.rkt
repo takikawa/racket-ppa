@@ -7,51 +7,62 @@
 (define-syntax (s:let stx)
   (define-syntax-class loopid
     #:description "loop identifier"
+    #:opaque
     (pattern :id))
   (define-syntax-class binding-pair
     #:description "binding pair"
     (pattern [name:id arg:expr]))
-  (define-syntax-class rest-binding
-    #:description "\"rest\" binding"
-    (pattern [rest-name:id rest-arg:expr ...]))
-  (define-splicing-syntax-class let-style-bindings
-    #:description "let-style bindings"
-    #:attributes (loop* [name 1] [arg 1] rest-name [rest-arg 1])
-    ;; in let-style bindings, rest-binding only allowed w/
-    ;; at least one binding-pair
-    (pattern (~seq (~optional loop*:loopid)
-                   (:binding-pair ...))
-             #:with (rest-arg ...) #'()
-             #:attr rest-name #f)
-    (pattern (~seq (~optional loop*:loopid)
-                   (:binding-pair ...+ . :rest-binding))))
-  (define-splicing-syntax-class define-style-bindings
-    #:description "define-style bindings"
-    #:attributes (loop* [name 1] [arg 1] rest-name [rest-arg 1])
-    (pattern (~seq (loop*:loopid :binding-pair ...))
-             #:with (rest-arg ...) #'()
-             #:attr rest-name #f)
-    (pattern (~seq (loop*:loopid
-                    :binding-pair ...
-                    . :rest-binding))))
-  (define-splicing-syntax-class bindings
+  (define-splicing-syntax-class maybe-rest-binding
     #:description #f
+    #:no-delimit-cut
+    (pattern (~describe "\"rest\" binding"
+                        (~seq (~describe #:opaque "\"rest\" identifier"
+                                         rest-name:id)
+                              ~!
+                              (~describe #:opaque "\"rest\" init expression"
+                                         rest-arg:expr)
+                              ...)))
+    (pattern (~seq)
+             #:attr rest-name #f
+             #:with (rest-arg ...) #'()))
+  (define-splicing-syntax-class bindings
+    #:description "bindings"
     #:attributes (loop* [name 1] [arg 1] rest-name [rest-arg 1])
-    (pattern :let-style-bindings)
-    (pattern :define-style-bindings)) 
+    (pattern
+     (~describe
+      "\"named let\"-style bindings"
+      (~seq loop*:loopid
+            ~!
+            (~describe
+             "parenthesized sequence of binding pairs with optional \"rest\" binding"
+             (:binding-pair ... :maybe-rest-binding)))))
+    (pattern
+     (~describe
+      "\"define\"-style bindings"
+      (~seq (loop*:loopid ~! :binding-pair ... :maybe-rest-binding))))
+    (pattern
+     (~describe
+      "\"let\"-style bindings with no loop identifier"
+      (~seq
+       (~or* (~describe #:opaque "empty sequence of binding pairs"
+                        (~and () (:binding-pair ... :maybe-rest-binding)))
+             (~describe
+              "parenthesized sequence of one or more binding pairs with optional \"rest\" binding"
+              (:binding-pair ...+ :maybe-rest-binding)))))
+     #:attr loop* #f))
   (syntax-parse stx
-    [(_ () body:expr ...+)
-     #'(let () body ...)]
     [(_ :bindings
-        body:expr ...+)
+        (~describe "body forms" (~seq body:expr ...+)))
+     ;; it is NOT an error for loop* to be shaddowed:
+     ;; see https://srfi-email.schemers.org/srfi-5/msg/18712014/
      #:fail-when (check-duplicate-identifier
                   (syntax->list #'(name ... (~? rest-name))))
      "duplicate variable name"
-     #:with loop (or (attribute loop*) #'tmp-loop)
-     #'(letrec ([loop (λ (~? (name ... . rest-name)
-                             (name ...))
-                        body ...)])
+     #:with loop (or (attribute loop*) #'anonymous-srfi-5-let)
+     #`(letrec ([loop #,(syntax-property
+                         (syntax/loc stx
+                          (λ (~? (name ... . rest-name)
+                                 (name ...))
+                            body ...))
+                         'inferred-name (or (attribute loop*) (void)))])
          (loop arg ...  rest-arg ...))]))
-
-
-

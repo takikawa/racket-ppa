@@ -12,7 +12,7 @@
          "lock.rkt")
 
 (provide font%
-         font-list% the-font-list
+         font-list% the-font-list current-font-list
          make-font
          family-symbol? style-symbol? smoothing-symbol? hinting-symbol?
          get-face-list
@@ -200,8 +200,7 @@
                                                       [(heavy) PANGO_WEIGHT_HEAVY]
                                                       [(ultraheavy) PANGO_WEIGHT_ULTRAHEAVY]
                                                       [else weight])))
-          (let ([size (if size-in-pixels? size (* dpi-scale size))])
-            (pango_font_description_set_absolute_size desc (* size PANGO_SCALE)))
+          (pango_font_description_set_absolute_size desc (* size-in-pixels PANGO_SCALE))
           (install! desc)
           (atomically (hash-set! font-descs key (make-ephemeron key desc)))
           desc)))
@@ -227,9 +226,12 @@
   (def/public (get-family) family)
 
   (define size 12.0)
+  (define size-in-points size)
+  (define size-in-pixels (* size-in-points dpi-scale))
   (def/public (get-point-size) (max 1 (inexact->exact (round size))))
   
-  (def/public (get-size) size)
+  (define/public (get-size [in-pixels? size-in-pixels?])
+    (if in-pixels? size-in-pixels size-in-points))
 
   (define size-in-pixels? #f)
   (def/public (get-size-in-pixels) size-in-pixels?)
@@ -278,7 +280,7 @@
     (set! weight _weight)
     (set! underlined? (and _underlined? #t))
     (set! smoothing _smoothing)
-    (set! size-in-pixels? _size-in-pixels?)
+    (set! size-in-pixels? (and _size-in-pixels? #t))
     (set! s-hinting _hinting)
     (set! feature-settings _feature-settings)]
    [([(real-in 0.0 1024.0) _size]
@@ -298,10 +300,18 @@
     (set! weight _weight)
     (set! underlined? (and _underlined? #t))
     (set! smoothing _smoothing)
-    (set! size-in-pixels? _size-in-pixels?)
+    (set! size-in-pixels? (and _size-in-pixels? #t))
     (set! s-hinting _hinting)
     (set! feature-settings _feature-settings)]
    (init-name 'font%))
+
+  (cond
+    [size-in-pixels?
+     (set! size-in-pixels size)
+     (set! size-in-points (/ size dpi-scale))]
+    [else
+     (set! size-in-pixels (* size dpi-scale))
+     (set! size-in-points size)])
 
   (define id 
     (if face
@@ -403,6 +413,8 @@
               family-name])))))
    string<?))
 
+(define current-font-list (make-parameter #f))
+
 (define (make-font #:size [size 12.0]
                    #:face [face #f]
                    #:family [family 'default]
@@ -412,7 +424,8 @@
                    #:smoothing [smoothing 'default]
                    #:size-in-pixels? [size-in-pixels? #f]
                    #:hinting [hinting 'aligned]
-                   #:feature-settings [feature-settings (hash)])
+                   #:feature-settings [feature-settings (hash)]
+                   #:font-list [font-list (current-font-list)])
   (unless (and (real? size) (<= 0.0 size 1024.0)) (raise-type-error 'make-font "real number in [0.0, 1024.0]" size))
   (unless (or (not face) (string? face)) (raise-type-error 'make-font "string or #f" face))
   (unless (family-symbol? family) (raise-type-error 'make-font "family-symbol" family))
@@ -420,4 +433,8 @@
   (unless (font-weight/c weight) (raise-argument-error 'make-font "font-weight/c" weight))
   (unless (smoothing-symbol? smoothing) (raise-type-error 'make-font "smoothing-symbol" smoothing))
   (unless (hinting-symbol? hinting) (raise-type-error 'make-font "hinting-symbol" hinting))
-  (make-object font% size face family style weight underlined? smoothing size-in-pixels? hinting feature-settings))
+  (unless (or (not font-list) (is-a? font-list font-list%))
+    (raise-argument-error 'make-font "(or/c (is-a?/c font-list%) #f)" font-list))
+  (if font-list
+      (send font-list find-or-create-font size face family style weight underlined? smoothing size-in-pixels? hinting feature-settings)
+      (make-object font% size face family style weight underlined? smoothing size-in-pixels? hinting feature-settings)))

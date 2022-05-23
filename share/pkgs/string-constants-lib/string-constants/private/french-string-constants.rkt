@@ -1407,17 +1407,11 @@
 
 
   ;;; languages
-  (beginning-student "Etudiant niveau débutant")
   (beginning-one-line-summary "define, cond, structs, constantes, et primitives")
-  (beginning-student/abbrev "Etudiant niveau débutant avec abréviations pour les listes")
   (beginning/abbrev-one-line-summary "Débutant, avec impression des résultats dans le REPL sous forme de listes")
-  (intermediate-student "Etudiant niveau intermédiaire")
   (intermediate-one-line-summary "Débutant plus portée lexicale")
-  (intermediate-student/lambda "Etudiant niveau intermédiaire, plus lambda")
   (intermediate/lambda-one-line-summary "Intermédiaire plus fonctions d'ordre supérieur")
-  (advanced-student "Etudiant niveau avancé")
   (advanced-one-line-summary "Intermédiaire plus lambda et mutation")
-  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Assez gros Scheme")
   (pretty-big-scheme-one-line-summary
    "Ajoute de la syntaxe et des fonctions provenants des languages HtDP, mzscheme, et mred/mred")

@@ -1017,17 +1017,11 @@ please adhere to these guidelines:
 
 
  ;;; languages
- (beginning-student "Beginning Student")
  (beginning-one-line-summary "定義, 条件式, 構造体, 定数, プリミティブ")
- (beginning-student/abbrev "Beginning Student with List Abbreviations")
  (beginning/abbrev-one-line-summary "Beginner で、REPL でリスト スタイルの表示を行う")
- (intermediate-student "Intermediate Student")
  (intermediate-one-line-summary "Beginner ＋ レキシカル スコープ")
- (intermediate-student/lambda "Intermediate Student with lambda")
  (intermediate/lambda-one-line-summary "Intermediate ＋ 高階関数")
- (advanced-student "Advanced Student")
  (advanced-one-line-summary "Intermediate ＋ lambda と mutation")
- (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
  (pretty-big-scheme "Pretty Big")
  (pretty-big-scheme-one-line-summary "syntax と HtDP 言語の関数を追加")
  (pretty-big-scheme-one-line-summary "HtDP 言語, mzscheme, mred/mred の構文と関数を追加")

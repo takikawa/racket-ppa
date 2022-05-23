@@ -849,10 +849,12 @@
 [mcons (-poly (a b) (-> a b (-mpair a b)))]
 [mcar (-poly (a b)
              (cl->* (-> (-mpair a b) a)
-                    (-> (-mlst a) a)))]
+                    (-> (-mlst a) a)
+                    (-> -MPairTop Univ)))]
 [mcdr (-poly (a b)
              (cl->* (-> (-mpair a b) b)
-                    (-> (-mlst a) (-mlst a))))]
+                    (-> (-mlst a) (-mlst a))
+                    (-> -MPairTop Univ)))]
 [set-mcar! (-poly (a b)
                   (cl->* (-> (-mpair a b) a -Void)
                          (-> (-mlst a) a -Void)))]
@@ -861,10 +863,12 @@
                          (-> (-mlst a) (-mlst a) -Void)))]
 [unsafe-mcar (-poly (a b)
                     (cl->* (-> (-mpair a b) a)
-                           (-> (-mlst a) a)))]
+                           (-> (-mlst a) a)
+                           (-> -MPairTop Univ)))]
 [unsafe-mcdr (-poly (a b)
                     (cl->* (-> (-mpair a b) b)
-                           (-> (-mlst a) (-mlst a))))]
+                           (-> (-mlst a) (-mlst a))
+                           (-> -MPairTop Univ)))]
 [unsafe-set-mcar! (-poly (a b)
                          (cl->* (-> (-mpair a b) a -Void)
                                 (-> (-mlst a) a -Void)))]
@@ -1342,7 +1346,7 @@
 ;raise-type-error (in index)
 [raise-mismatch-error (-> Sym -String Univ (Un))]
 ;raise-arity-error
-[raise-syntax-error (->opt (-opt Sym) -String [Univ Univ (-lst (-Syntax Univ))] (Un))]
+[raise-syntax-error (->optkey (-opt Sym) -String [Univ Univ (-lst (-Syntax Univ)) -String] #:exn (-> (-lst (-Syntax Univ)) -String -Cont-Mark-Set -Exn) #f (Un))]
 
 [unquoted-printing-string? (make-pred-ty -Unquoted-Printing-String)]
 [unquoted-printing-string (-> -String -Unquoted-Printing-String)]
@@ -2348,18 +2352,14 @@
 ;; Section 13.7.1
 [readtable? (make-pred-ty -Read-Table)]
 [make-readtable
- (cl->*
-  (-> -Read-Table -Read-Table)
-  (-> -Read-Table
-      (-opt -Char) (Un (one-of/c 'terminating-macro 'non-terminating-macro 'dispatch-macro) -Char)
-      (-> -Char -Input-Port (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)
-      -Read-Table)
-  (-> -Read-Table
-      (-opt -Char) (Un (one-of/c 'terminating-macro 'non-terminating-macro 'dispatch-macro) -Char)
-      (-> -Char -Input-Port (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)
-      (-opt -Char) (Un (one-of/c 'terminating-macro 'non-terminating-macro 'dispatch-macro) -Char)
-      (-> -Char -Input-Port (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)
-      -Read-Table))]
+ (->* (list (-opt -Read-Table))
+      (make-Rest
+       (list (-opt -Char)
+             (Un (one-of/c 'terminating-macro 'non-terminating-macro 'dispatch-macro) -Char)
+             (Un (-> -Char -Input-Port (-opt -PosInt) (-opt -Nat)
+                     (-opt -PosInt) (-opt -Nat) Univ)
+                 (-opt -Read-Table))))
+      -Read-Table)]
 
 [readtable-mapping (-> -Read-Table -Char
                        (-values (list

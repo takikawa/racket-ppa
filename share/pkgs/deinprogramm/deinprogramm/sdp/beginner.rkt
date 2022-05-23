@@ -18,7 +18,7 @@
 (provide-and-document
  procedures
  (all-from-except beginner: deinprogramm/sdp/private/primitives procedures
-		  set! eq? equal?
+		  set! eq?
 		  quote
 		  empty empty? cons cons? first rest
 		  length map for-each reverse append list list-ref fold filter

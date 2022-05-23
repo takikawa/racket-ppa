@@ -142,9 +142,9 @@ to delegate to the scheme-lexer (in the 'no-lang-line mode).
   
 (define (module-lexer in offset mode)
   (define (attribs->symbol type)
-    (if (symbol? type)
-        type
-        (hash-ref type 'type 'unknown)))
+    (if (hash? type)
+        (hash-ref type 'type 'unknown)
+        type))
   (define-values (lexeme type data start end backup new-mode)
     (do-module-lexer* in offset mode (lambda (lexer)
                                        (cond

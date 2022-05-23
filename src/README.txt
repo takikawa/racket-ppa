@@ -244,7 +244,7 @@ Detailed instructions:
     documentation.
 
     For a `--prefix` build, unless `--enable-sharezo` is specified,
-    "compiled" directories containin ".zo" files are moved from
+    "compiled" directories containing ".zo" files are moved from
     "share" to "lib" as the last step of installation. (The
     "config.rktd" file is updated so that `current-compile-file-roots`
     is initialized to find the relocated ".zo" files.) For Racket BC,
@@ -306,7 +306,8 @@ but note the following:
 
  * The Racket build creates a framework, "Racket.framework", which is
    installed into "racket/lib".  This framework is used by the `racket`
-   executable that goes into "racket/bin".
+   executable that goes into "racket/bin" unless the `--enable-embedfw`
+   flag is used.
 
  * The GRacket build creates a GUI-executable variant of the Racket
    executable. The GRacket build process also downloads (from github)
@@ -374,11 +375,29 @@ Cross-compilation requires at least two flags to `configure`:
    run `configure` again (with no arguments) in a "local" subdirectory
    to create a build for the current platform.
 
-An additional flag is needed for building Racket CS, unless the flag
-`--enable-racket=auto` is used:
+For Racket CS, an additional flag is required:
 
- * `--enable-scheme=DIR`, where DIR is a path that has a "ChezScheme"
-   directory where Chez Scheme is built for the host system.
+ * `--enable-scheme=SCHEME`, where SCHEME is a Chez Scheme executable
+   executable that runs on the build platform; the executable must be
+   the same version as used in Racket built for the target platform.
+ 
+   Supplying `--enable-scheme=DIR` is also supported, where DIR is a
+   path that has a "ChezScheme" directory where Chez Scheme is built
+   for the host system (but not necessarily installed).
+
+The `--enable-racket=RACKET` and `--enable-scheme=SCHEME` flags are
+allowed for non-cross builds, too:
+
+ * For Racket CS, supplying either selects a Racket or Chez Scheme
+   implementation used to create boot files to the build platform.
+   Suppling Chez Scheme is a much more direct path, but when Racket is
+   supplied, its version does not have to match the version being
+   built.
+
+ * For Racket BC, `--enable-racket=RACKET` selects a Racket for
+   prepare C sources to cooperate with garbage collection. Its version
+   needs to be close to the one being built, and potentially exactly
+   the same version.
 
 Some less commonly needed `configure` flags are for Racket BC:
 
@@ -388,7 +407,7 @@ Some less commonly needed `configure` flags are for Racket BC:
 
  * `--enable-cify` or `--disable-cify` if the JIT availability on the
     target platform is different than the build platform; use
-    `--enable-cify` if the JIT is not abailable on the target
+    `--enable-cify` if the JIT is not available on the target
     platform.
 
 
@@ -477,6 +496,25 @@ inheriting the build machine's disposition.
 
 
 ========================================================================
+ Compiling without run-time code generation
+========================================================================
+
+Racket programs and expressions are normally compiled to machine code
+either at run time (when `eval` is used or when Racket BC JIT-compiles
+bytecode) or in advance (when compiling to ".zo" files using Racket
+CS). Interpreted modes are available --- but slower, of course:
+
+ * Racket CS: configure with `--enable-pb`, which uses a bytecode
+   virtual machine instead of native code. By default, core functions
+   are compiled to some extent via C; use `--disable-pbchunk` to
+   disable even that compilation.
+
+ * Racket BC: configure with `--disable-jit`, or run Racket with the
+   `-j` flag. On some supported platforms (such as AArch64), Racket BC
+   lacks JIT support and always uses interpreted mode.
+
+
+========================================================================
  Modifying Racket
 ========================================================================
 
@@ -529,7 +567,7 @@ Sources for the Racket CS implementation
 
  * "io" --- I/O
 
-    This layer uses the "racketio" library to access OS facilties.
+    This layer uses the "racketio" library to access OS facilities.
 
  * "regexp" --- regexp matcher
 
@@ -543,11 +581,11 @@ Sources for the Racket BC implementation
 
    This implementation can build from "scratch" with a C compiler, but
    first by building a CGC variant of Racket to transform the C
-   sourses to build a (normal) 3m variant.
+   sources to build a (normal) 3m variant.
 
  * "mzcom" --- MzCOM executable (for Windows)
 
- * "mysink" --- `ffi/unsafe/com` helper DLL (for Windows)
+ * "myssink" --- `ffi/unsafe/com` helper DLL (for Windows)
 
  * "cify" --- a Racket-to-C compiler
 
@@ -596,7 +634,7 @@ Sources shared by both Racket implementations
 
  * "setup-go.rkt" --- helper script
 
-   The "setup-go.rkt" script is a bootstrapping too that is used by
+   The "setup-go.rkt" script is a bootstrapping tool that is used by
    parts of the build that need to run Racket programs in the process
    of building Racket.
 

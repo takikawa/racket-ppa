@@ -1212,17 +1212,11 @@
  (please-select-a-language "Sprache auswählen")
  
  ;;; languages
- (beginning-student "Anfänger")
  (beginning-one-line-summary "define, cond, Strukturen, Konstanten und Primitiva")
- (beginning-student/abbrev "Anfänger mit Listen-Abkürzungen")
  (beginning/abbrev-one-line-summary "Anfänger, wobei Listen mit „list“ in der REPL ausgedruckt werden")
- (intermediate-student "Zwischenstufe")
  (intermediate-one-line-summary "Anfänger plus lexikalische Bindung")
- (intermediate-student/lambda "Zwischenstufe mit lambda")
  (intermediate/lambda-one-line-summary "Zwischenstufe plus Prozeduren höherer Ordnung")
- (advanced-student "Fortgeschritten")
  (advanced-one-line-summary "Zwischenstufe plus lambda und Mutation")
- (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one…
  (pretty-big-scheme "Kombo")
  (pretty-big-scheme-one-line-summary "Macht Syntax and Prozeduren der HtDP-Sprachen verfügbar")
  (r5rs-language-name "R5RS")

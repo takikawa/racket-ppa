@@ -1734,7 +1734,7 @@
                                                (run-command cmd #:handle-exn? #f)))
                                            #t)))]
                                      [else (orig in)])))])
-                 (define v (expeditor-read ee))
+                 (define v (expeditor-read ee #:prompt (string-append prefix ">")))
                  (cond
                    [(eof-object? v) v]
                    [(xrepl-command-and-argument-port? v) v]

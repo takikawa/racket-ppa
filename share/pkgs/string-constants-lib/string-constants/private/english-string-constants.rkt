@@ -1189,7 +1189,8 @@ please adhere to these guidelines:
   (close-tab "Close Tab") ;; must not have any &s in it.
    ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
   (close-tab-amp "&Close Tab")
-
+  (reopen-closed-tab "Reopen Closed Tab")
+  
   ;;; edit menu
   (split-menu-item-label "&Split")
   (collapse-menu-item-label "C&ollapse")
@@ -1410,17 +1411,11 @@ please adhere to these guidelines:
 
 
   ;;; languages
-  (beginning-student "Beginning Student")
   (beginning-one-line-summary "define, cond, structs, constants, and primitives")
-  (beginning-student/abbrev "Beginning Student with List Abbreviations")
   (beginning/abbrev-one-line-summary "Beginner, with list style printing in the REPL")
-  (intermediate-student "Intermediate Student")
   (intermediate-one-line-summary "Beginner plus lexical scope")
-  (intermediate-student/lambda "Intermediate Student with lambda")
   (intermediate/lambda-one-line-summary "Intermediate plus higher-order functions")
-  (advanced-student "Advanced Student")
   (advanced-one-line-summary "Intermediate plus lambda and mutation")
-  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Pretty Big")
   (pretty-big-scheme-one-line-summary
    "Adds syntax and functions from the HtDP languages, mzscheme, & mred/mred")
