@@ -1070,17 +1070,11 @@
   
   
   ;;; languages
-  (beginning-student "初級")
   (beginning-one-line-summary "define、cond、結構體、常量和基本操作")
-  (beginning-student/abbrev "初級+縮寫的表")
   (beginning/abbrev-one-line-summary "在初級的基礎上，用縮寫形式輸出表")
-  (intermediate-student "中級")
   (intermediate-one-line-summary "在初級的基礎上增加了詞法作用域")
-  (intermediate-student/lambda "中級+lambda")
   (intermediate/lambda-one-line-summary "在中級的基礎上，增加了高階函數")
-  (advanced-student "高級")
   (advanced-one-line-summary "在中級的基礎上，增加了lambda和賦值")
-  (how-to-design-programs "程序設計方法/How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "大")
   (pretty-big-scheme-one-line-summary "MzScheme/MrEd加HtDP(程序設計方法)語言")
   (r5rs-lang-name "R5RS")

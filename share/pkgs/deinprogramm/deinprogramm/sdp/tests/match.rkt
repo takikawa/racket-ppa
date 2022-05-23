@@ -49,6 +49,19 @@
     (check-equal? (foo 5) 'five)
     (check-equal? (foo 2) 'two))
 
+   (test-case
+     "internal define"
+     (define foo
+       (lambda (x)
+         (match x
+           (1 (define y (+ x 1)) y)
+           ((list a b c)
+            (define y (+ a b c))
+            (+ y 1)))))
+
+     (check-equal? (foo 1) 2)
+     (check-equal? (foo (list 1 2 3)) 7))
+   
 
    (test-case
     "variables"

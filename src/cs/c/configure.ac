@@ -23,9 +23,11 @@ AC_ARG_ENABLE(compressmore, [  --enable-compressmore   compress compiled code ev
 AC_ARG_ENABLE(compressboot, [  --enable-compressboot   compress boot files])
 m4_include(../ac/path_arg.m4)
 AC_ARG_ENABLE(racket,     [  --enable-racket=<path>  use <path> as Racket for build; or "auto" to create])
-AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  use <path> as host's build directory for cross])
+AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  use <path> as host build for cross])
 AC_ARG_ENABLE(mach,       [  --enable-mach=<mach>    use Chez Scheme machine type <mach>])
 AC_ARG_ENABLE(target,     [  --enable-target=<mach>  cross-build for Chez Scheme machine type <mach>])
+AC_ARG_ENABLE(pb,         [  --enable-pb             build for platform without native-code backend])
+AC_ARG_ENABLE(pbchunk,    [  --enable-pbchunk        enable C chunks for pb boot (enabled by default)])
 m4_include(../ac/portable_arg.m4)
 m4_include(../ac/natipkg_arg.m4)
 m4_include(../ac/sdk_arg.m4)
@@ -81,9 +83,11 @@ show_explicitly_disabled "${enable_compressboot}" "Compressed boot files"
 show_explicitly_enabled "${enable_xonx}" "Unix style"
 m4_include(../ac/path_show.m4)
 show_explicitly_set "${enable_racket}" "Racket"
-show_explicitly_set "${enable_scheme}" "Chez Scheme build directory"
+show_explicitly_set "${enable_scheme}" "Chez Scheme for build"
 show_explicitly_set "${enable_mach}" "machine type"
 show_explicitly_set "${enable_target}" "cross-build machine type"
+show_explicitly_set "${enable_pb}" "pb machine type"
+show_explicitly_disabled "${enable_pbchunk}" "pbchunk"
 m4_include(../ac/portable_show.m4)
 m4_include(../ac/natipkg_show.m4)
 show_explicitly_enabled "${enable_libz}" "Installed libz"
@@ -179,6 +183,8 @@ compress_boot_files_by_default=no
 cs_auto_flags=--disable-auto-flags
 
 COPY_NEW_CFLAGS_TO_CPPFLAGS=no
+
+PBCHUNK_MODE=plain
 
 ###### Autoconfigure #######
 
@@ -381,22 +387,28 @@ fi
 case "$MACH_HOST_CPU" in
   x86_64)
     MACH="${thread_prefix}a6${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb64l"
     ;;
   x86|i*86)
     MACH="${thread_prefix}i3${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb32l"
     ;;
   aarch64*|arm64*)
     MACH="${thread_prefix}arm64${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb64l"
     ;;
   arm*)
     MACH="${thread_prefix}arm32${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb32l"
     ;;
   powerpc64*)
     MACH=""
+    pb_machine_name="${thread_prefix}pb64b"
     # MACH="${thread_prefix}ppc64${MACH_OS}"
     ;;
   power*)
     MACH="${thread_prefix}ppc32${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb32b"
     ;;
 esac
 
@@ -408,6 +420,17 @@ fi
 
 if test "${enable_mach}" != "" ; then
   MACH="${enable_mach}"
+fi
+
+# For a pb build where Racket is supplied, force cross-build
+# mode on the assumption that the host is not a a pb build
+# (because it should be created with default configure options)
+if test "${enable_pb}" = "yes" ; then
+  if test "${enable_racket}" != "" ; then
+    if test "${enable_target}" = "" ; then
+      enable_target="${MACH}"
+    fi
+  fi
 fi
 
 if test "${enable_target}" != "" ; then
@@ -473,7 +496,6 @@ elif test "${build_os}_${build_cpu}" != "${host_os}_${host_cpu}" ; then
   MACH=${BUILD_MACH}
   CROSS_MODE="cross"
 else
-  BUILD_MACH=${MACH}
   TARGET_MACH=${MACH}
   CROSS_MODE=""
 fi
@@ -504,9 +526,21 @@ esac
 
 SCHEME_DIR=${srcdir}/../../ChezScheme
 MAKE_BUILD_SCHEME=checkout
+USE_SCHEME_MODE="_built"
+MAKE_SCHEME_MODE="${T_CROSS_MODE}"
 
 if test "${enable_scheme}" != "" ; then
-  CS_HOST_WORKAREA_PREFIX="${enable_scheme}/"
+   if test -d "${enable_scheme}" ; then
+     # Directory exists, so use it as a build directory
+     echo "Using supplied Scheme path as a build directory"
+     CS_HOST_WORKAREA_PREFIX="${enable_scheme}/"
+   else
+     # Directory does not exist, so assume it's an executable
+     echo "Using supplied Scheme path as an executable"
+     MAKE_SCHEME_MODE="${T_CROSS_MODE}-via-scheme"
+     MAKE_SCHEME_SCHEME="${enable_scheme}"
+     USE_SCHEME_MODE="_existing"
+   fi     
 fi
 
 if test "${enable_racket}" != "" ; then
@@ -682,6 +716,34 @@ if test "${enable_liblz4}" = "yes" ; then
   fi
 fi
 
+############## libffi in pb mode ################
+
+KERNEL_MACH="${MACH}"
+KERNEL_TARGET_MACH="${TARGET_MACH}"
+
+if test "${enable_pb}" = "yes" ; then
+  enable_libffi=yes
+  enable_foreign=yes
+  CONFIG_MAIN_SCHEME_MODE="--pbarch --enable-libffi"
+  TARGET_MACH=${pb_machine_name}
+  if test "${CROSS_MODE}" != "cross" ; then
+    MACH=${pb_machine_name}
+  fi
+  if test "${CONFIGURE_RACKET_SO_COMPILE}" = "" ; then
+    CONFIGURE_RACKET_SO_COMPILE="env"
+  fi
+  CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} PLT_CS_MACHINE_TYPE=${KERNEL_TARGET_MACH}"
+  if test "${enable_pbchunk}" != "no" ; then
+    PBCHUNK_MODE=pbchunk
+  fi
+else
+  CONFIG_MAIN_SCHEME_MODE=""
+fi
+
+libffi_unavailable_message="did not find working configuration"
+complain_if_libffi_fails=yes
+m4_include(../ac/libffi.m4)
+
 ############## other inferred machine properties ################
 
 AC_CHECK_SIZEOF([void *])
@@ -785,8 +847,8 @@ fi
 
 m4_include(../ac/rktio_keep.m4)
 
-SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${cs_auto_flags} ${extra_scheme_config_args}"
-SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${cs_auto_flags} ${disable_curses_arg} ${extra_scheme_config_args}"
+SCHEME_CONFIG_ARGS="--machine=${KERNEL_MACH} --disable-x11 ${disable_curses_arg} ${cs_auto_flags} ${extra_scheme_config_args}"
+SCHEME_CROSS_CONFIG_ARGS="--machine=${KERNEL_TARGET_MACH} --disable-x11 ${cs_auto_flags} ${disable_curses_arg} ${extra_scheme_config_args}"
 
 AC_SUBST(upsrcdir)
 AC_SUBST(CC)
@@ -817,10 +879,14 @@ AC_SUBST(BOOTFILE_RACKET)
 AC_SUBST(SCHEME_DIR)
 AC_SUBST(MACH)
 AC_SUBST(TARGET_MACH)
+AC_SUBST(KERNEL_TARGET_MACH)
 AC_SUBST(DIFF_MACH)
 AC_SUBST(CROSS_MODE)
 AC_SUBST(T_CROSS_MODE)
 AC_SUBST(TT_CROSS_MODE)
+AC_SUBST(MAKE_SCHEME_MODE)
+AC_SUBST(MAKE_SCHEME_SCHEME)
+AC_SUBST(USE_SCHEME_MODE)
 AC_SUBST(SETUP_BOOT_MODE)
 AC_SUBST(OSX)
 AC_SUBST(NOT_OSX)
@@ -838,6 +904,7 @@ AC_SUBST(BOOT_COMPRESS_COMP)
 AC_SUBST(MAKE_BUILD_SCHEME)
 AC_SUBST(SCHEME_CONFIG_ARGS)
 AC_SUBST(SCHEME_CROSS_CONFIG_ARGS)
+AC_SUBST(CONFIG_MAIN_SCHEME_MODE)
 AC_SUBST(FRAMEWORK_INSTALL_DIR)
 AC_SUBST(FRAMEWORK_PREFIX)
 AC_SUBST(FRAMEWORK_REL_INSTALL)
@@ -847,6 +914,7 @@ AC_SUBST(ENABLE_OR_DISABLE_WPO)
 AC_SUBST(COMP_SUBDIR_CONFIGURE_ARGS)
 AC_SUBST(CROSS_COMPILE_TARGET_KIND)
 AC_SUBST(CS_HOST_WORKAREA_PREFIX)
+AC_SUBST(PBCHUNK_MODE)
 AC_SUBST(RUN_RACKET)
 AC_SUBST(INSTALL_SETUP_FLAGS)
 AC_SUBST(INSTALL_SETUP_RACKET_FLAGS)

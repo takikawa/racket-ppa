@@ -1028,17 +1028,11 @@ please adhere to these guidelines:
   
   
  ;;; languages
- (beginning-student "Студент-початківець")
  (beginning-one-line-summary "define, cond, структури, константи та примітиви")
- (beginning-student/abbrev "Студент-початківець зі списковими скороченнями")
  (beginning/abbrev-one-line-summary "Студент-початківець зі списковим стилем друку в циклі \"читання-обчислення-друк\"")
- (intermediate-student "Середній студент")
  (intermediate-one-line-summary "Студент-початківець з лексичною видимістю")
- (intermediate-student/lambda "Середній студент з лямбда-виразами")
  (intermediate/lambda-one-line-summary "Середній студент з функціями вищих порядків")
- (advanced-student "Досвічений студент")
  (advanced-one-line-summary "Середній студент з лямбда-виразами й мутацією")
- (how-to-design-programs "Як проектувати програми") ;; should agree with MIT Press on this one...
  (pretty-big-scheme "Pretty Big")
  (pretty-big-scheme-one-line-summary "Додані синтаксис і функції мов з \"Як проектувати програми\" в mzscheme й mred")
  (r5rs-language-name "R5RS")

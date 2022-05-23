@@ -13,8 +13,11 @@
                find-library-collection-paths
                use-collection-link-paths
                current-compiled-file-roots
+               current-load/use-compiled
                find-compiled-file-roots
                find-main-config
+               read-installation-configuration-table
+               get-installation-name
                executable-yield-handler
                load-on-demand-enabled
                use-user-specific-search-paths
@@ -153,6 +156,7 @@
                              [platform-independent-zo-mode? "cs"]
                              [else (symbol->string (machine-type))])))]
              [else "compiled"])))
+   (define make? #f)
    (define user-specific-search-paths? #t)
    (define load-on-demand? #t)
    (define compile-target-machine (if (getenv "PLT_COMPILE_ANY")
@@ -452,6 +456,9 @@
              [("-v" "--version") 
               (set! version? #t)
               (flags-loop (cdr args) (see saw 'non-config))]
+             [("-y" "--make")
+              (set! make? #t)
+              (loop (cdr args))]
              [("-c" "--no-compiled")
               (set! compiled-file-paths '())
               (loop (cdr args))]
@@ -624,7 +631,7 @@
    (define-values (struct:gc-info make-gc-info gc-info? gc-info-ref gc-info-set!)
      (make-struct-type 'gc-info #f 10 0 #f null 'prefab #f '(0 1 2 3 4 5 6 7 8 9)))
    (define (K plus n)
-     (let* ([s (number->string (quotient (abs n) 1000))]
+     (let* ([s (number->string (quotient (abs n) 1024))]
             [len (string-length s)]
             [len2 (+ len
                      (quotient (sub1 len) 3)
@@ -707,9 +714,9 @@
           (when gcs-on-exit?
             (collect-garbage)
             (collect-garbage))
-          (let ([debug-GC? (log-level?* root-logger 'debug 'GC)]
-                [debug-GC:major? (log-level?* root-logger 'debug 'GC:major)])
-            (when (or debug-GC? debug-GC:major?)
+          (let ([info-GC? (log-level?* root-logger 'info 'GC)]
+                [info-GC:major? (log-level?* root-logger 'info 'GC:major)])
+            (when (or info-GC? info-GC:major?)
               (let ([msg (chez:format "GC: 0:atexit peak ~a(~a); alloc ~a; major ~a; minor ~a; ~ams"
                                       (K "" peak-mem)
                                       (K "+" (- (maximum-memory-bytes) peak-mem))
@@ -719,9 +726,9 @@
                                       (let ([t (sstats-gc-cpu (statistics))])
                                         (+ (* (time-second t) 1000)
                                            (quotient (time-nanosecond t) 1000000))))])
-                (when debug-GC?
+                (when info-GC?
                   (log-message root-logger 'info 'GC msg #f #f))
-                (when debug-GC:major?
+                (when info-GC:major?
                   (log-message root-logger 'info 'GC:major msg #f #f)))))
           (linklet-performance-report!)
           (custodian-shutdown-root-at-exit)
@@ -778,19 +785,21 @@
       [else
        (set-collects-dir! init-collects-dir)])
      (set-config-dir! init-config-dir)
-     (unless (eq? init-collects-dir 'disable)
-       (current-library-collection-links
-        (find-library-collection-links))
-       (current-library-collection-paths
-        (find-library-collection-paths collects-pre-extra (reverse rev-collects-post-extra))))
-     (let ([roots (find-compiled-file-roots)])
-       (if compiled-roots-path-list-string
-           (current-compiled-file-roots
-            (let ([s (regexp-replace* "@[(]version[)]"
-                                      compiled-roots-path-list-string
-                                      (version))])
-              (path-list-string->path-list s roots)))
-           (current-compiled-file-roots roots))))
+     (let* ([config (read-installation-configuration-table)]
+            [name (get-installation-name config)])
+       (unless (eq? init-collects-dir 'disable)
+         (current-library-collection-links
+          (find-library-collection-links config name))
+         (current-library-collection-paths
+          (find-library-collection-paths collects-pre-extra (reverse rev-collects-post-extra) config name)))
+       (let ([roots (find-compiled-file-roots config)])
+         (if compiled-roots-path-list-string
+             (current-compiled-file-roots
+              (let ([s (regexp-replace* "@[(]version[)]"
+                                        compiled-roots-path-list-string
+                                        (version))])
+                (path-list-string->path-list s roots)))
+             (current-compiled-file-roots roots)))))
 
    ;; Called when Racket is embedded in a larger application:
    (define (register-embedded-entry-info! escape)
@@ -875,7 +884,7 @@
           (loop (cdr l))))
       (lambda ()
         (let ([f (dynamic-require mod sym)])
-          (f pch)))))
+          (|#%app| f pch)))))
    (set-destroy-place!
     (lambda ()
       (io-place-destroy!)))
@@ -921,6 +930,12 @@
        (lambda ()
          (initialize-exit-handler!)
          (initialize-place!)
+
+         (when (and make? (not (null? compiled-file-paths)))
+           (|#%app|
+            current-load/use-compiled
+            (|#%app| (dynamic-require 'compiler/private/cm-minimal
+                                      'make-compilation-manager-load/use-compiled-handler))))
 
          (when init-library
            (namespace-require+ init-library))

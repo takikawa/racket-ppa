@@ -194,12 +194,12 @@ static void idiot_checks() {
   }
 #endif
 #endif
+#ifndef PORTABLE_BYTECODE
   if (sizeof(wchar_t) * 8 != wchar_bits) {
     fprintf(stderr, "sizeof(wchar_t) * 8 [%ld] != wchar_bits [%d]\n",
               (long)sizeof(wchar_t), wchar_bits);
     oops = 1;
   }
-#ifndef PORTABLE_BYTECODE
   if (sizeof(size_t) * 8 != size_t_bits) {
     fprintf(stderr, "sizeof(size_t) * 8 [%ld] != size_t_bits [%d]\n",
               (long)sizeof(size_t), size_t_bits);
@@ -498,7 +498,11 @@ static char *get_defaultheapdirs() {
 #endif
 
 static char *get_defaultheapdirs() {
+#if defined(__EMSCRIPTEN__)
+  return ".";
+#else
   return DEFAULT_HEAP_PATH;
+#endif
 }
 #endif /* WIN32 */
 
@@ -1105,6 +1109,10 @@ extern void Sregister_heap_file(UNUSED const char *path) {
 extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_init) PROTO((void)); {
   ptr tc = Svoid; /* initialize to make gcc happy */
   ptr p;
+
+#if defined(ALWAYS_USE_BOOT_FILE)
+  kernel = ALWAYS_USE_BOOT_FILE;
+#endif
 
   switch (current_state) {
     case UNINITIALIZED:

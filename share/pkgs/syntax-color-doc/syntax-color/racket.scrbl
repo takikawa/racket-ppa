@@ -64,11 +64,10 @@ result is @racket[#t] when the token corresponds to @litchar["'"],
                                                     (racket-tabify-table->head-sexp-type
                                                      racket-tabify-default-table)]
                                   [#:graphical-width graphical-width
-                                                     (or/c #f ((is-a?/c color-textoid<%>)
-                                                               exact-nonnegative-integer?
-                                                               exact-nonnegative-integer?
-                                                               . -> .
-                                                               exact-nonnegative-integer?))])
+                                                     (or/c #f (-> (is-a?/c color-textoid<%>)
+                                                                  exact-nonnegative-integer?
+                                                                  exact-nonnegative-integer?
+                                                                  (or/c #f exact-nonnegative-integer?)))])
           (or/c #f exact-nonnegative-integer?)]{
 
 Returns an amount of indentation to use for the line in @racket[text]
@@ -81,9 +80,15 @@ should use. See @xmethod[racket:text<%> compute-racket-amount-to-indent]
 for more information.
 
 The @racket[graphical-width] function is used to
-get the graphical width of content in @racket[text] between a start
-and end position. If @racket[graphical-width] is @racket[#f], then
-characters in @racket[text] are assumed to be all the same width.}
+get the graphical width (distance between the ``x'' coordinates)
+of content in @racket[text] between a start
+and end position. If @racket[graphical-width] returns @racket[#f], then
+characters in @racket[text] are assumed to be all the same width. If
+@racket[graphical-width] is @racket[#f], it is treated the same as if
+it had been @racket[(λ (t start end) #f)].
+
+@history[#:changed "1.5"
+         @list{Allow @racket[graphical-width] to return @racket[#f].}]}
 
 @defproc[(racket-tabify-table->head-sexp-type [spec (list/c (hash/c symbol? (or/c 'lambda 'define 'begin 'for/fold))
                                                             (or/c #f regexp?)

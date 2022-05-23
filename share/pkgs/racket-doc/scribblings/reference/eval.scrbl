@@ -151,6 +151,7 @@ If the second argument to the load handler is a symbol, then:
        (read-accept-compiled #t)
        (read-accept-bar-quote #t)
        (read-accept-graph #t)
+       (read-syntax-accept-graph #f)
        (read-decimal-as-inexact #t)
        (read-accept-dot #t)
        (read-accept-infix-dot #t)
@@ -687,6 +688,14 @@ supported. The @racket['target-machine] mode of @racket[system-type]
 reports the running Racket's native target machine.
 
 @history[#:added "7.1.0.6"]}
+
+
+@defparam[current-compile-realm realm symbol?]{
+
+Determines the @tech{realm} that is assigned to modules and procedures
+when they are compiled.
+
+@history[#:added "8.4.0.2"]}
 
 
 @defboolparam[eval-jit-enabled on?]{

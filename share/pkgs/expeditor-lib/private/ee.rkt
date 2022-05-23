@@ -1275,7 +1275,7 @@
          => (lambda (mpos)
               (define ln (list-ref lns (pos-row mpos)))
               (let ([cexp (expected (string-ref (ln-str ln) (pos-col mpos)))])
-                (unless (eqv? c cexp)
+                (unless (or (not cexp) (eqv? c cexp))
                   (string-set! str col cexp)
                   (define color (vector-ref colors col))
                   (unless (eqv? color default-color)

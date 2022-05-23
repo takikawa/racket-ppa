@@ -17,7 +17,7 @@ directory is organized into two layers:
 
 The Racket source distribution includes already-bootstrapped files to
 build Racket CS. Some of those files are checked into the Racket Git
-rrepository, and the rest are in a sibling "pb" repository that that
+repository, and the rest are in a sibling "pb" repository that that
 Racket repository's top-level makefile checks out.
 
 Building Racket CS from original sources requires an existing Racket
@@ -39,16 +39,20 @@ build:
    installed in the "../ChezScheme/boot/pb" directory as described by
    "../ChezScheme/BUILDING".
 
+   Supplying `--enable-scheme=...` is also an option if you alerady
+   have the same version of Chez Scheme built on the current platform.
+   Another build will be created, anyway, but more quickly than
+   without Chez Scheme.
+
  * Racket is needed to generate the files in the "schemified"
    directory from the sources in sibling directories like "../io". The
    Racket version must be practically the same as the current Racket
-   verson, although it can be the Racket BC implementation (instead of
+   version, although it can be the Racket BC implementation (instead of
    the Racket CS implementation).
 
    Unlike Chez Scheme boot files, the files generated in "schemified"
    are human-readable and -editable Scheme code. That provides a way
    out of bootstrapping black holes, even without BC.
-   
 
 
 ========================================================================
@@ -272,12 +276,12 @@ Files in this directory:
          Racket) of the thread and event subsystem.
 
  schemified/*.scm (generated) - A conversion from a ".rktl" file to be
-         `included`d into an ".sls" library.
+         `include`d into an ".sls" library.
 
  ../build/so-rktio/rktio.rktl (generated) and
  ../../lib/librktio.{so,dylib,dll} (generated) - Created when building
          the "io" layer, the "rktio.rktl" file contains FFI descriptions
-         that are `included` by "io.sls" and "librktio.{so,dylib,dll}"
+         that are `include`d by "io.sls" and "librktio.{so,dylib,dll}"
          is the shared library that implements rktio.
 
          CAUTION: The makefile here doesn't track dependencies for
@@ -489,8 +493,8 @@ Inlining Expectations
 
 Chez Scheme will inline small Rumble functions as long as the inlined
 function body refers only to primitives and other identifiers that are
-explicitly defined in the Rumble library body. The "explicily defined"
-part can be tricky, particularly since inling will consider the
+explicitly defined in the Rumble library body. The "explicitly defined"
+part can be tricky, particularly since inlining will consider the
 function body after other inlining is already applied. For example,
 given
 
@@ -570,7 +574,7 @@ from that layer, but any provided name also needs to be added to
 (a hash table) that the expander layer uses to create primitive
 modules like `#%kernel`. The entries in "primitive" files use the
 constructors defined in "../schemify/known.rkt" to describe
-primitives; note that most of the numebrs you see are arity masks in
+primitives; note that most of the numbers you see are arity masks in
 the sense of `procedure-arity-mask`.
 
 For some additions to rktio with corresponding changes to the io

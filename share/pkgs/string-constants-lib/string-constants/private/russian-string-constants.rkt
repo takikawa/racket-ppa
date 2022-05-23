@@ -1035,17 +1035,11 @@ please adhere to these guidelines:
   
   
  ;;; languages
- (beginning-student "Начинающий студент")
  (beginning-one-line-summary "define, cond, структуры, константы и примитивы")
- (beginning-student/abbrev "Начинающий студент со списковыми сокращениями")
  (beginning/abbrev-one-line-summary "Начинающий студент со списковым стилем печати в цикле \"чтение-вычисление-печать\"")
- (intermediate-student "Средний студент")
  (intermediate-one-line-summary "Начинающий студент с лексической видимостью")
- (intermediate-student/lambda "Средний студент с лямбда-выражениями")
  (intermediate/lambda-one-line-summary "Средний студент с функциями высших порядков")
- (advanced-student "Продвинутый студент")
  (advanced-one-line-summary "Средний студент с лямбда-выражениями и мутацией")
- (how-to-design-programs "Как проектировать программы") ;; should agree with MIT Press on this one...
  (pretty-big-scheme "Pretty Big")
  (pretty-big-scheme-one-line-summary "Добавлены синтаксис и функции языков из \"Как проектировать программы\" в mzscheme и mred")
  (r5rs-language-name "R5RS")

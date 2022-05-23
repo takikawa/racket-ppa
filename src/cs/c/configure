@@ -628,6 +628,7 @@ INSTALL_LIBS_ENABLE
 INSTALL_SETUP_RACKET_FLAGS
 INSTALL_SETUP_FLAGS
 RUN_RACKET
+PBCHUNK_MODE
 CS_HOST_WORKAREA_PREFIX
 CROSS_COMPILE_TARGET_KIND
 COMP_SUBDIR_CONFIGURE_ARGS
@@ -637,6 +638,7 @@ CS_INSTALLED
 FRAMEWORK_REL_INSTALL
 FRAMEWORK_PREFIX
 FRAMEWORK_INSTALL_DIR
+CONFIG_MAIN_SCHEME_MODE
 SCHEME_CROSS_CONFIG_ARGS
 SCHEME_CONFIG_ARGS
 MAKE_BUILD_SCHEME
@@ -654,10 +656,14 @@ MINGW
 NOT_OSX
 OSX
 SETUP_BOOT_MODE
+USE_SCHEME_MODE
+MAKE_SCHEME_SCHEME
+MAKE_SCHEME_MODE
 TT_CROSS_MODE
 T_CROSS_MODE
 CROSS_MODE
 DIFF_MACH
+KERNEL_TARGET_MACH
 TARGET_MACH
 MACH
 SCHEME_DIR
@@ -798,6 +804,8 @@ enable_racket
 enable_scheme
 enable_mach
 enable_target
+enable_pb
+enable_pbchunk
 enable_portable
 enable_natipkg
 enable_sdk
@@ -1448,9 +1456,11 @@ Optional Features:
   --enable-docs           build docs on install (enabled by default)
   --enable-usersetup      setup user-specific files on install
   --enable-racket=<path>  use <path> as Racket for build; or "auto" to create
-  --enable-scheme=<path>  use <path> as host's build directory for cross
+  --enable-scheme=<path>  use <path> as host build for cross
   --enable-mach=<mach>    use Chez Scheme machine type <mach>
   --enable-target=<mach>  cross-build for Chez Scheme machine type <mach>
+  --enable-pb             build for platform without native-code backend
+  --enable-pbchunk        enable C chunks for pb boot (enabled by default)
   --enable-portable       prefer portable to host-specific
   --enable-natipkg        add "-natipkg" to library subpath
   --enable-sdk=<path>     use Mac OS 10.4 SDK directory
@@ -2637,6 +2647,16 @@ if test "${enable_target+set}" = set; then :
   enableval=$enable_target;
 fi
 
+# Check whether --enable-pb was given.
+if test "${enable_pb+set}" = set; then :
+  enableval=$enable_pb;
+fi
+
+# Check whether --enable-pbchunk was given.
+if test "${enable_pbchunk+set}" = set; then :
+  enableval=$enable_pbchunk;
+fi
+
 
 # Check whether --enable-portable was given.
 if test "${enable_portable+set}" = set; then :
@@ -2867,9 +2887,11 @@ show_explicitly_enabled "${enable_xonx}" "Unix style"
 show_explicitly_enabled "${enable_libzo}" 'Compiled ".zo" files moved to lib'
 
 show_explicitly_set "${enable_racket}" "Racket"
-show_explicitly_set "${enable_scheme}" "Chez Scheme build directory"
+show_explicitly_set "${enable_scheme}" "Chez Scheme for build"
 show_explicitly_set "${enable_mach}" "machine type"
 show_explicitly_set "${enable_target}" "cross-build machine type"
+show_explicitly_set "${enable_pb}" "pb machine type"
+show_explicitly_disabled "${enable_pbchunk}" "pbchunk"
 show_explicitly_enabled "${enable_portable}" "portable"
 
 show_explicitly_enabled "${enable_natipkg}" "Adding \"-natipkg\" suffix to library subpath"
@@ -3291,6 +3313,8 @@ compress_boot_files_by_default=no
 cs_auto_flags=--disable-auto-flags
 
 COPY_NEW_CFLAGS_TO_CPPFLAGS=no
+
+PBCHUNK_MODE=plain
 
 ###### Autoconfigure #######
 
@@ -4622,22 +4646,28 @@ fi
 case "$MACH_HOST_CPU" in
   x86_64)
     MACH="${thread_prefix}a6${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb64l"
     ;;
   x86|i*86)
     MACH="${thread_prefix}i3${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb32l"
     ;;
   aarch64*|arm64*)
     MACH="${thread_prefix}arm64${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb64l"
     ;;
   arm*)
     MACH="${thread_prefix}arm32${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb32l"
     ;;
   powerpc64*)
     MACH=""
+    pb_machine_name="${thread_prefix}pb64b"
     # MACH="${thread_prefix}ppc64${MACH_OS}"
     ;;
   power*)
     MACH="${thread_prefix}ppc32${MACH_OS}"
+    pb_machine_name="${thread_prefix}pb32b"
     ;;
 esac
 
@@ -4649,6 +4679,17 @@ fi
 
 if test "${enable_mach}" != "" ; then
   MACH="${enable_mach}"
+fi
+
+# For a pb build where Racket is supplied, force cross-build
+# mode on the assumption that the host is not a a pb build
+# (because it should be created with default configure options)
+if test "${enable_pb}" = "yes" ; then
+  if test "${enable_racket}" != "" ; then
+    if test "${enable_target}" = "" ; then
+      enable_target="${MACH}"
+    fi
+  fi
 fi
 
 if test "${enable_target}" != "" ; then
@@ -4714,7 +4755,6 @@ elif test "${build_os}_${build_cpu}" != "${host_os}_${host_cpu}" ; then
   MACH=${BUILD_MACH}
   CROSS_MODE="cross"
 else
-  BUILD_MACH=${MACH}
   TARGET_MACH=${MACH}
   CROSS_MODE=""
 fi
@@ -4745,9 +4785,21 @@ esac
 
 SCHEME_DIR=${srcdir}/../../ChezScheme
 MAKE_BUILD_SCHEME=checkout
+USE_SCHEME_MODE="_built"
+MAKE_SCHEME_MODE="${T_CROSS_MODE}"
 
 if test "${enable_scheme}" != "" ; then
-  CS_HOST_WORKAREA_PREFIX="${enable_scheme}/"
+   if test -d "${enable_scheme}" ; then
+     # Directory exists, so use it as a build directory
+     echo "Using supplied Scheme path as a build directory"
+     CS_HOST_WORKAREA_PREFIX="${enable_scheme}/"
+   else
+     # Directory does not exist, so assume it's an executable
+     echo "Using supplied Scheme path as an executable"
+     MAKE_SCHEME_MODE="${T_CROSS_MODE}-via-scheme"
+     MAKE_SCHEME_SCHEME="${enable_scheme}"
+     USE_SCHEME_MODE="_existing"
+   fi
 fi
 
 if test "${enable_racket}" != "" ; then
@@ -5583,7 +5635,7 @@ rm -f core conftest.err conftest.$ac_objext \
       if test "${enable_curses}" = "no" ; then
         if test "${enable_portable}" = "yes" ; then
           if test "${curses_portable_link}" != "" ; then
-            # Try adding portabel link flags
+            # Try adding portable link flags
             ORIG_LIBS="$LIBS"
             ORIG_CPPFLAGS="$CPPFLAGS"
             ORIG_PREFLAGS="$PREFLAGS"
@@ -5626,6 +5678,38 @@ rm -f core conftest.err conftest.$ac_objext \
         # Try adding -lncurses
         ORIG_LIBS="$LIBS"
         curses_lib_flag=" -lncurses"
+        LIBS="$LIBS $curses_lib_flag"
+        cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <curses.h>
+        #include <term.h>
+int
+main ()
+{
+        int errret;
+        setupterm("", 0, &errret);
+         return 0;
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  enable_curses=yes
+else
+  enable_curses=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+        if test "${enable_curses}" = "no" ; then
+          LIBS="$ORIG_LIBS"
+          curses_lib_flag=""
+        fi
+      fi
+      if test "${enable_curses}" = "no" ; then
+        # Try adding -lncurses -ltinfo
+        ORIG_LIBS="$LIBS"
+        curses_lib_flag=" -lncurses -ltinfo"
         LIBS="$LIBS $curses_lib_flag"
         cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
@@ -5785,6 +5869,104 @@ $as_echo "$have_lz4" >&6; }
     extra_scheme_config_args="${extra_scheme_config_args} LZ4=-llz4"
   fi
 fi
+
+############## libffi in pb mode ################
+
+KERNEL_MACH="${MACH}"
+KERNEL_TARGET_MACH="${TARGET_MACH}"
+
+if test "${enable_pb}" = "yes" ; then
+  enable_libffi=yes
+  enable_foreign=yes
+  CONFIG_MAIN_SCHEME_MODE="--pbarch --enable-libffi"
+  TARGET_MACH=${pb_machine_name}
+  if test "${CROSS_MODE}" != "cross" ; then
+    MACH=${pb_machine_name}
+  fi
+  if test "${CONFIGURE_RACKET_SO_COMPILE}" = "" ; then
+    CONFIGURE_RACKET_SO_COMPILE="env"
+  fi
+  CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} PLT_CS_MACHINE_TYPE=${KERNEL_TARGET_MACH}"
+  if test "${enable_pbchunk}" != "no" ; then
+    PBCHUNK_MODE=pbchunk
+  fi
+else
+  CONFIG_MAIN_SCHEME_MODE=""
+fi
+
+libffi_unavailable_message="did not find working configuration"
+complain_if_libffi_fails=yes
+if test "${enable_libffi}" = "yes" ; then
+ if test "${enable_foreign}" = "yes" ; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for libffi" >&5
+$as_echo_n "checking for libffi... " >&6; }
+
+  # Try to get flags form pkg-config:
+  libffi_config_prog="pkg-config libffi"
+  libffi_config_preflags=`$libffi_config_prog --cflags-only-I  2> /dev/null`
+  if test "$?" = 0 ; then
+    libffi_config_cflags=`$libffi_config_prog --cflags-only-other  2> /dev/null`
+    if test "$?" = 0 ; then
+      libffi_config_libs=`$libffi_config_prog --libs  2> /dev/null`
+      if test "$?" != 0 ; then
+        libffi_config_preflags=""
+        libffi_config_cflags=""
+        libffi_config_libs="-lffi"
+      fi
+    else
+      libffi_config_preflags=""
+      libffi_config_cflags=""
+      libffi_config_libs="-lffi"
+    fi
+  else
+    libffi_config_preflags=""
+    libffi_config_cflags=""
+    libffi_config_libs="-lffi"
+  fi
+
+  OLD_CFLAGS="${CFLAGS}"
+  OLD_LIBS="${LIBS}"
+  CFLAGS="${CFLAGS} ${libffi_config_preflags} ${libffi_config_cflags}"
+  LIBS="${LIBS} ${libffi_config_libs}"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <ffi.h>
+int
+main ()
+{
+ffi_cif cif;
+              ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 0, &ffi_type_void, NULL);
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  have_libffi=yes
+else
+  have_libffi=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $have_libffi" >&5
+$as_echo "$have_libffi" >&6; }
+  if test "${have_libffi}" = "no" ; then
+    CFLAGS="${OLD_CFLAGS}"
+    LIBS="${OLD_LIBS}"
+    echo "${libffi_unavailable_message}"
+    if test "${complain_if_libffi_fails}" = "yes" ; then
+       echo configure: unable to link to libffi
+       exit 1
+    fi
+  else
+    CFLAGS="${OLD_CFLAGS}"
+    PREFLAGS="${PREFLAGS} ${libffi_config_preflags}"
+    COMPFLAGS="${COMPFLAGS} ${libffi_config_cflags}"
+    echo "Using installed libffi"
+    OWN_LIBFFI="OFF"
+  fi
+ fi
+fi
+
 
 ############## other inferred machine properties ################
 
@@ -5947,8 +6129,14 @@ do
 done
 
 
-SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${cs_auto_flags} ${extra_scheme_config_args}"
-SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${cs_auto_flags} ${disable_curses_arg} ${extra_scheme_config_args}"
+SCHEME_CONFIG_ARGS="--machine=${KERNEL_MACH} --disable-x11 ${disable_curses_arg} ${cs_auto_flags} ${extra_scheme_config_args}"
+SCHEME_CROSS_CONFIG_ARGS="--machine=${KERNEL_TARGET_MACH} --disable-x11 ${cs_auto_flags} ${disable_curses_arg} ${extra_scheme_config_args}"
+
+
+
+
+
+
 
 
 

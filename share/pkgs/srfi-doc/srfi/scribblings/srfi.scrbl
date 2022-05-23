@@ -1,12 +1,23 @@
 #lang scribble/doc
-@(require srfi/scribblings/util
+@(require "util.rkt"
           scribble/manual
           scribble/eval
           scriblib/render-cond
           scribble/core
           scribble/html-properties
           (for-syntax scheme/base)
-          (for-label scheme/base
+          (for-label (except-in scheme/base
+                                make-date ;; but we DO want `date`
+                                date?
+                                date-second
+                                date-minute
+                                date-hour
+                                date-day
+                                date-month
+                                date-year
+                                date-week-day
+                                date-year-day)
+                     srfi/19
                      racket/stream))
 
 @; ----------------------------------------------------------------------
@@ -27,7 +38,7 @@ which can be implemented as libraries. To import the bindings of SRFI
 ]
 
 This document lists the SRFIs that are supported by Racket and
-provides a link to the original SRFI specification (which is also
+provides links to the original SRFI specifications (which are also
 distributed as part of Racket's documentation).
 
 @table-of-contents[]
@@ -95,7 +106,7 @@ functions.
  (concatenate #f "concatenate")
  (concatenate! #f "concatenate!")
  (reverse #f "reverse")
- (reverse! #f "srfi-1.html")
+ (reverse! #f "reverse!")
  (append-reverse #f "append-reverse")
  (append-reverse! #f "append-reverse!")
  (zip #f "zip")
@@ -114,7 +125,7 @@ functions.
  (unfold #f "unfold")
  (unfold-right #f "unfold-right")
  (map #f "map")
- (for-each #f "srfi-1.html")
+ (for-each #f "for-each")
  (append-map #f "append-map")
  (append-map! #f "append-map!")
  (map! #f "map!")
@@ -153,7 +164,6 @@ functions.
  (alist-copy #f "alist-copy")
  (alist-delete #f "alist-delete")
  (alist-delete! #f "alist-delete!")
- (lset #f "lset")
  (lset= #f "lset=")
  (lset-adjoin #f "lset-adjoin")
  (lset-union #f "lset-union")
@@ -195,6 +205,11 @@ functions.
 
 This SRFI's reader and printer syntax is not supported. The bindings
 are also available from @racketmodname[scheme/foreign].
+
+@; ----------------------------------------
+
+@; special case for historical license reasons
+@include-section["srfi-5-doc-free.scrbl"]
 
 @; ----------------------------------------
 
@@ -430,7 +445,7 @@ are also available from @racketmodname[scheme/foreign].
 @srfi[17]{Generalized set!}
 
 @redirect[17 '(
- (set! #t "set!")
+ (set! #t "!set")
  (getter-with-setter #f "getter-with-setter")
 )]
 
@@ -439,13 +454,13 @@ are also available from @racketmodname[scheme/foreign].
 @srfi[19]{Time Data Types and Procedures}
 
 @redirect[19 '(
- (time-duration #f "")
+ (time-duration #f "time-duration")
  (time-monotonic #f "time-monotonic")
  (time-process #f "time-process")
  (time-tai #f "time-tai")
  (time-thread #f "time-thread")
  (time-utc #f "time-utc")
- (current-date #f "")
+ (current-date #f "current-date")
  (current-julian-day #f "current-julian-day")
  (current-modified-julian-day #f "current-modified-julian-day")
  (current-time #f "current-time")
@@ -526,20 +541,31 @@ to the one provided by @racketmodname[racket/base] in most cases
 (see @racket[date]).
 
 For backwards compatibility, when an invalid date field value is
-provided to the SRFI constructor, the constructor will produce a lax
-date structure. A lax date structure is @emph{not} compatible with
-functions from @racketmodname[racket/base] or
+provided to the SRFI constructor, the constructor will produce a
+@deftech{lax date structure}. A lax date structure is @emph{not}
+compatible with functions from @racketmodname[racket/base] or
 @racketmodname[racket/date]. SRFI functions such as
 @racket[string->date] may return a lax date structure depending on the
 format string.
+The predicate @racket[lax-date?] recognizes lax dat structures.
+
+As an extension, Racket's implementation of @racket[string->date]
+supports @litchar{~?} as a conversion specifier:
+it parses one- and two-digit years like @litchar{~y}
+and three- and four-digit years like @litchar{~Y}.
 
 @(define srfi-19-eval (make-base-eval))
 @(srfi-19-eval '(require srfi/19))
 
+@examples[#:eval srfi-19-eval
+  (string->date "4-1-99" "~d-~m-~?")
+  (string->date "4-1-1999" "~d-~m-~?")
+]
+
 @defproc[(lax-date? [v any/c]) boolean?]{
 
-Returns @racket[#t] if @racket[_v] is a lax date structure. Otherwise
-returns @racket[#f].
+Returns @racket[#t] if @racket[_v] is a @tech{lax date structure}.
+Otherwise, returns @racket[#f].
 
 @examples[#:eval srfi-19-eval
   (lax-date? (make-date 0 19 10 10 14 "bogus" "bogus" 0))
@@ -688,8 +714,8 @@ This SRFI's syntax is part of Racket's default reader and printer.
 
 @redirect[40 '(
  (stream-cons #t "stream-cons")
- (stream? #f "stream?")
- (stream-null? #f "stream-null?")
+ (stream? #f "streamp")
+ (stream-null? #f "stream-nullp")
  (stream-car #f "stream-car")
  (stream-cdr #f "stream-cdr")
  (stream-delay #t "stream-delay")
@@ -787,7 +813,7 @@ same as from @racketmodname[racket/stream].
  (:real-range #t ":real-range")
  (:char-range #t ":char-range")
  (:port #t ":port")
- (:dispatched #t "")
+ (:dispatched #t ":dispatched")
  (:generator-proc #t ":generator-proc")
  (:do #t ":do")
  (:let #t ":let")
@@ -814,7 +840,7 @@ from @racketmodname[scheme/base] and @mz-if from
  (vector-append #f "vector-append")
  (vector-concatenate #f "vector-concatenate")
  (vector? #f "vector-p")
- (vector-empty? #f "vector-empty?")
+ (vector-empty? #f "vector-empty-p")
  (vector= #f "vector-eq")
  (vector-ref #f "vector-ref")
  (vector-length #f "vector-length")
@@ -837,10 +863,10 @@ from @racketmodname[scheme/base] and @mz-if from
  (vector-reverse! #f "vector-reverse-bang")
  (vector-copy! #f "vector-copy-bang")
  (vector-reverse-copy! #f "vector-reverse-copy-bang")
- (vector->list #f "vector->list")
- (reverse-vector->list #f "reverse-vector->list")
- (list->vector #f "list->vector")
- (reverse-list->vector #f "reverse-list->vector")
+ (vector->list #f "vector-to-list")
+ (reverse-vector->list #f "reverse-vector-to-list")
+ (list->vector #f "list-to-vector")
+ (reverse-list->vector #f "reverse-list-to-vector")
 )]
 
 @; ----------------------------------------

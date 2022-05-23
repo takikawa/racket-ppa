@@ -87,6 +87,11 @@ void S_alloc_init() {
 
         S_protect(&S_G.zero_length_bignum);
         S_G.zero_length_bignum = S_bignum(tc, 0, 0);
+
+#ifdef PORTABLE_BYTECODE
+        S_protect(&S_G.foreign_callables);
+        S_G.foreign_callables = Snil;
+#endif
     }
 }
 
@@ -162,12 +167,19 @@ ptr S_compute_bytes_allocated(xg, xs) ptr xg; ptr xs; {
     n += S_G.bytesof[g][countof_phantom];
     for (s = smin; s <= smax; s++) {
       ptr next_loc;
+      uptr amt;
      /* add in bytes previously recorded */
       n += S_G.bytes_of_space[g][s];
      /* add in bytes in active segments */
       next_loc = THREAD_GC(tc)->next_loc[g][s];
-      if (next_loc != FIX(0))
-        n += (uptr)next_loc - (uptr)THREAD_GC(tc)->base_loc[g][s];
+      if (next_loc != FIX(0)) {
+        amt = (uptr)next_loc - (uptr)THREAD_GC(tc)->base_loc[g][s];
+        if (s != space_code) {
+          /* don't double-count eagerly counted part */
+          n += amt & (uptr)(bytes_per_segment - 1);
+        } else
+          n += amt;
+      }
       if (s == space_data) {
         /* don't count space used for bitmaks */
         n -= S_G.bitmask_overhead[g];
@@ -214,10 +226,17 @@ static void close_off_segment(thread_gc *tgc, ptr old, ptr base_loc, ptr sweep_l
   if (base_loc) {
     seginfo *si;
     uptr bytes = (uptr)old - (uptr)base_loc;
+    uptr n_delayed;
 
     /* increment bytes_allocated by the closed-off partial segment */
-    S_G.bytes_of_space[g][s] += bytes;
-    S_G.bytes_of_generation[g] += bytes;
+    if (s != space_code) {
+      /* delayed count is only for the last segment */
+      n_delayed = bytes & (uptr)(bytes_per_segment - 1);
+    } else
+      n_delayed = bytes;
+
+    S_G.bytes_of_space[g][s] += n_delayed;
+    S_G.bytes_of_generation[g] += n_delayed;
 
     /* lay down an end-of-segment marker */
     *(ptr*)TO_VOIDP(old) = forward_marker;
@@ -258,6 +277,13 @@ ptr S_find_more_gc_room(thread_gc *tgc, ISPC s, IGEN g, iptr n, ptr old) {
   tgc->sweep_loc[g][s] = new;
   tgc->bytes_left[g][s] = (new_bytes - n) - allocation_segment_tail_padding;
   tgc->next_loc[g][s] = (ptr)((uptr)new + n);
+
+  if ((s != space_code) && (n >= bytes_per_segment)) {
+    /* count most of the memory now, instead of waiting until the segment is closed off */
+    iptr n_now = n & ~((uptr)(bytes_per_segment - 1));
+    S_G.bytes_of_space[g][s] += n_now;
+    S_G.bytes_of_generation[g] += n_now;
+  }
 
 #if defined(WRITE_XOR_EXECUTE_CODE)
   if (s == space_code) {
@@ -1096,6 +1122,7 @@ ptr S_phantom_bytevector(sz) uptr sz; {
 }
 
 void S_phantom_bytevector_adjust(ph, new_sz) ptr ph; uptr new_sz; {
+  ptr tc = get_thread_context();
   uptr old_sz = PHANTOMLEN(ph);
   seginfo *si;
   IGEN g;
@@ -1109,5 +1136,9 @@ void S_phantom_bytevector_adjust(ph, new_sz) ptr ph; uptr new_sz; {
   S_adjustmembytes(new_sz - old_sz);
   PHANTOMLEN(ph) = new_sz;
 
+  maybe_queue_fire_collector(THREAD_GC(tc));
+
   tc_mutex_release();
+
+  S_maybe_fire_collector(THREAD_GC(tc));
 }

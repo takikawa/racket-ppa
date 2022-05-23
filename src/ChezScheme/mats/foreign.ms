@@ -23,8 +23,10 @@
       [(_ [else e ...]) #'(begin (void) e ...)]
       [(_) #'(void)])))
 
-(machine-case
- [(pb)]
+(meta-cond
+ [(and (pb?)
+       (not (guard (x [#t #f]) (eval '(foreign-callable void () void)))))
+  (void)]
  [else
 
 #;(define-syntax foreign-struct-mat
@@ -214,7 +216,7 @@
       (error? (load-shared-object 3))
     )
    ]
-  [(i3nt ti3nt a6nt ta6nt)
+  [(i3nt ti3nt a6nt ta6nt arm64nt tarm64nt)
    (mat load-shared-object
       (file-exists? foreign1.so)
       (begin (load-shared-object foreign1.so) #t)
@@ -225,13 +227,24 @@
    ]
   [(i3osx ti3osx a6osx ta6osx ppc32osx tppc32osx arm64osx tarm64osx)
    (mat load-shared-object
-      (file-exists? foreign1.so)
+     (file-exists? foreign1.so)
       (begin (load-shared-object foreign1.so) #t)
       (begin (load-shared-object "libc.dylib") #t)
       #t
       (error? (load-shared-object 3))
     )
    ]
+  [(pb tpb pb32 tpb32)
+   (mat load-shared-object
+     (file-exists? foreign1.so)
+     (begin (load-shared-object foreign1.so) #t)
+     (let ([try-load (lambda (path)
+                       (guard (x [#t #f])
+                              (load-shared-object path)
+                              #t))])
+       (or (try-load "libc.so.7")
+           (try-load "libc.so.6")
+           (try-load "libc.dylib"))))]
   [else
    (mat foreign-procedure
       (error? (foreign-procedure "foo" () scheme-object))
@@ -1996,6 +2009,11 @@
   (eqv? (ftype-ref A (y) a) 0)
   (not (ff-locked-decr (ftype-&ref A (y) a)))
   (ff-locked-incr (ftype-&ref A (y) a))
+  (not (ftype-locked-incr! A (y) a))
+  (ftype-locked-decr! A (y) a)
+  (not (ftype-locked-decr! A (y) a))
+  (ftype-locked-incr! A (y) a)
+  (not (ftype-locked-incr! A (y) a))
 )
 
 (mat foreign-anonymous
@@ -2748,7 +2766,7 @@
           (fprintf to-stdin "'hello\n") ; should cause exception, then abort (via reset)
           (flush-output-port to-stdin)
           (let ([pid^ (machine-case
-                        [(i3nt ti3nt a6nt ta6nt) pid]
+                        [(i3nt ti3nt a6nt ta6nt arm64nt tarm64nt) pid]
                         [else ((foreign-procedure "waitpid" (int (* int) int) int) pid (make-ftype-pointer int 0) 0)])])
             (and
               (equal? s1 "Exception: oops 1")
@@ -2767,10 +2785,18 @@
          '(load-shared-object "libc.so.6")]
         [(i3fb ti3fb a6fb ta6fb)
          '(load-shared-object "libc.so.7")]
-        [(i3nt ti3nt a6nt ta6nt)
+        [(i3nt ti3nt a6nt ta6nt arm64nt tarm64nt)
          '(load-shared-object "msvcrt.dll")]
         [(i3osx ti3osx a6osx ta6osx ppc32osx tppc32osx arm64osx tarm64osx)
          '(load-shared-object "libc.dylib")]
+        [(pb tpb pb32 tpb32)
+         '(let ([try-load (lambda (path)
+                            (guard (x [#t #f])
+                                   (load-shared-object path)
+                                   #t))])
+            (or (try-load "libc.so.7")
+                (try-load "libc.so.6")
+                (try-load "libc.dylib")))]
         [else (error 'load-libc "unrecognized machine type ~s" (machine-type))]))
     (define varargs_df (foreign-procedure (__varargs_after 1) "varargs_df" (double int int) double))
     (define varargs_dfii (foreign-procedure (__varargs_after 2) "varargs_dfii" (double int int) double))
@@ -3050,10 +3076,16 @@
           (check-3 long t int 7 (+ 70 x) 700)
           (check-3 i64 t int 9 (+ 90 x) 900)
           (check-3 i8 t int 10 (+ 100 x) 1000))]))
-    (define malloc_at_boundary (foreign-procedure "malloc_at_boundary"
-                                                  (int) uptr))
-    (define free_at_boundary (foreign-procedure "free_at_boundary"
-                                                (uptr) void))
+    (machine-case
+     [(pb tpb pb32 tpb32)
+      ;; libffi doesn't write precisely
+      (define malloc_at_boundary (foreign-procedure "malloc" (int) uptr))
+      (define free_at_boundary (foreign-procedure "free" (uptr) void))]
+     [else
+      (define malloc_at_boundary (foreign-procedure "malloc_at_boundary"
+                                                    (int) uptr))
+      (define free_at_boundary (foreign-procedure "free_at_boundary"
+                                                  (uptr) void))])
     #t)
   (check i8 -11)
   (check u8 129)
@@ -3325,14 +3357,19 @@
   (not (reference-bytevector? 7))
   (begin
     (define $reftest-bv (make-reference-bytevector (* 2 (foreign-sizeof 'ptr))))
+    (define $reftest-bv-odd (make-reference-bytevector (* 3 (foreign-sizeof 'ptr))))
     (reference-bytevector? $reftest-bv))
   (eqv? (* 2 (foreign-sizeof 'ptr)) (bytevector-length $reftest-bv))
+  (eqv? (* 3 (foreign-sizeof 'ptr)) (bytevector-length $reftest-bv-odd))
   (eq? #f (bytevector-reference-ref $reftest-bv 0))
+  (eq? #f (bytevector-reference-ref $reftest-bv-odd 0))
   (begin
     (define $reftest-bv2 (bytevector 1 2 3 4 5 6))
     (bytevector-reference-set! $reftest-bv 0 $reftest-bv2)
+    (bytevector-reference-set! $reftest-bv-odd 0 $reftest-bv2)
     (collect)
     (eq? $reftest-bv2 (bytevector-reference-ref $reftest-bv 0)))
+  (eq? $reftest-bv2 (bytevector-reference-ref $reftest-bv-odd 0))
   (with-interrupts-disabled
    (eqv? (if (= (foreign-sizeof 'ptr) 8)
              (bytevector-u64-native-ref $reftest-bv 0)
@@ -3346,10 +3383,14 @@
   (begin
     (define $reftest-bv3 (bytevector 5 6 7 8))
     (bytevector-reference-set! $reftest-bv (foreign-sizeof 'ptr) $reftest-bv3)
+    (bytevector-reference-set! $reftest-bv-odd (foreign-sizeof 'ptr) $reftest-bv3)
     (collect)
     (eq? $reftest-bv2 (bytevector-reference-ref $reftest-bv 0)))
+  (eq? $reftest-bv2 (bytevector-reference-ref $reftest-bv-odd 0))
   (eq? $reftest-bv3 (bytevector-reference-ref $reftest-bv (foreign-sizeof 'ptr)))
   (eq? $reftest-bv3 (bytevector-reference*-ref $reftest-bv (foreign-sizeof 'ptr)))
+  (eq? $reftest-bv3 (bytevector-reference-ref $reftest-bv-odd (foreign-sizeof 'ptr)))
+  (eq? $reftest-bv3 (bytevector-reference*-ref $reftest-bv-odd (foreign-sizeof 'ptr)))
 
   (let ()
     (lock-object $reftest-bv3)
@@ -3365,14 +3406,27 @@
     (if (= (foreign-sizeof 'ptr) 8)
         (bytevector-u64-native-set! $reftest-bv 8 $reftest-mem4)
         (bytevector-u32-native-set! $reftest-bv 4 $reftest-mem4))
+    (if (= (foreign-sizeof 'ptr) 8)
+        (bytevector-u64-native-set! $reftest-bv-odd 8 $reftest-mem4)
+        (bytevector-u32-native-set! $reftest-bv-odd 4 $reftest-mem4))
     (eqv? $reftest-mem4 (bytevector-reference*-ref $reftest-bv (foreign-sizeof 'ptr))))
+  (eqv? $reftest-mem4 (bytevector-reference*-ref $reftest-bv-odd (foreign-sizeof 'ptr)))
 
   (begin
+    ;; clear reference to `$reftest-mem4` before we free it:
+    (if (= (foreign-sizeof 'ptr) 8)
+        (bytevector-u64-native-set! $reftest-bv 8 0)
+        (bytevector-u32-native-set! $reftest-bv 4 0))
+    (if (= (foreign-sizeof 'ptr) 8)
+        (bytevector-u64-native-set! $reftest-bv-odd 8 0)
+        (bytevector-u32-native-set! $reftest-bv-odd 4 0))
     (foreign-free $reftest-mem4)
     (define $reftest-flv (flvector 3.0 6.0 7.0))
     (bytevector-reference-set! $reftest-bv 0 $reftest-flv)
+    (bytevector-reference-set! $reftest-bv-odd 0 $reftest-flv)
     (collect)
     (eq? $reftest-flv (bytevector-reference-ref $reftest-bv 0)))
+  (eq? $reftest-flv (bytevector-reference-ref $reftest-bv-odd 0))
   (with-interrupts-disabled
    (eqv? (if (= (foreign-sizeof 'ptr) 8)
              (bytevector-u64-native-ref $reftest-bv 0)
@@ -3410,5 +3464,7 @@
   (begin
     (bytevector-reference-set! $reftest-bv 0 #f)
     (eq? #f (bytevector-reference-ref $reftest-bv 0)))
+  (begin
+    (bytevector-reference-set! $reftest-bv-odd 0 #f)
+    (eq? #f (bytevector-reference-ref $reftest-bv-odd 0)))
 )
-
