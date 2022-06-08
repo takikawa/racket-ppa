@@ -26,7 +26,12 @@ This is documentation for the language level @italic{Schreibe Dein Programm!
 
 @defform[(define id expr)]{
 Diese Form ist eine Definition, und bindet @racket[id] als
-globalen Namen an den Wert von @racket[expr].}
+Namen an den Wert von @racket[expr].
+Eine Definition kann ganz außen vorkommen, dann ist sie global und
+kann überall verwendet werden.  Eine Definition kann aber auch innerhalb eines
+@racket[lambda]-Ausdrucks oder innerhalb von @racket[cond]- und @racket[match]-Zweigen
+vorkommen, dann ist sie lokal und nur dort gültig.}
+
 
 @section{Record-Typ-Definitionen}
 
@@ -67,14 +72,6 @@ Argumente akzeptiert, entsprechend den Signatur-Parametern
 Signaturen @racket[signature] der Felder verwendet werden.
 }
 
-@section{Record-Typ-Definition, alte Form}
-
-@defform[(define-record-functions ...)]{ Dies ist ein Synonym für
-@racket[define-record] und existiert nur zur Erhaltung der
-Kompatibilität mit älteren Versionen des Buchs.
-}
-
-
 @section[#:tag "application"]{Funktionsapplikation}
 
 @defform/none[(expr expr ...)]{
@@ -100,10 +97,13 @@ Operanden ersetzt wurden.}
 
 @section{@racket[lambda] / @racket[λ]}
 
-@defform[(lambda (id ...) expr)]{
-Ein Lambda-Ausdruck ergibt bei der Auswertung eine Funktion.}
+@defform[(lambda (id ...) definition ... expr)]{
+Ein Lambda-Ausdruck ergibt bei der Auswertung eine Funktion.
 
-@defform[(λ (id ...) expr)]{
+Im Rumpf können interne Definitionen vorkommen, die aber nur in
+@racket[expr] gelten.}
+
+@defform[(λ (id ...) definition ... expr)]{
 @racket[λ] ist ein anderer Name für @racket[lambda].
 }
 
@@ -119,7 +119,7 @@ Wert. }
 
 @section{@racket[cond]}
 
-@defform[(cond (expr expr) ... (expr expr))]{
+@defform[(cond (expr definition ... expr) ... (expr definition ... expr))]{
 Ein @racket[cond]-Ausdruck bildet eine Verzweigung, die aus mehreren
 Zweigen besteht. Jeder Zweig besteht
 aus einem Test und einem Ausdruck. Bei der Auswertung werden die
@@ -128,10 +128,13 @@ ausgewertet, der jeweils einen booleschen Wert ergeben müssen. Beim
 ersten Test, der @racket[#t] ergibt, wird der Wert des Ausdrucks des Zweigs zum
 Wert der gesamten Verzweigung. Wenn kein Test @racket[#t] ergibt, wird das
 Programm mit einer Fehlermeldung abgebrochen.
+
+In einem @racket[cond]-Zweig können lokale Definitionen mit
+@racket[define] vorkommen.
 }
 
 @defform/none[#:literals (cond else)
-              (cond (expr expr) ... (else expr))]{
+              (cond (expr definition ... expr) ... (else definition expr))]{
  Die Form des @racket[cond]-Ausdrucks ist ähnlich zur vorigen, mit der
  Ausnahme, dass in dem Fall, in dem kein Test @racket[#t] ergibt, der Wert des
  letzten Ausdruck zum Wert der @racket[cond]-Form wird.
@@ -348,7 +351,7 @@ Fall, aber nicht für solche mit Signaturvariablen.}
 
 @section{Pattern-Matching}
 
-@defform[(match expr (pattern expr) ...)
+@defform[(match expr (pattern definition ... expr) ...)
 		#:grammar [(pattern
 		                id
 				#t

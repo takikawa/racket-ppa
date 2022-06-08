@@ -1311,17 +1311,11 @@
 
 
   ;;; languages
-  (beginning-student "Начално ниво")
   (beginning-one-line-summary "дефиниции, условни изрази, структури, константи и примитиви")
-  (beginning-student/abbrev "Начално ниво със съкращения на списъци")
   (beginning/abbrev-one-line-summary "Начинаещ със стилово извеждане на списъците в REPL")
-  (intermediate-student "Междинно ниво")
   (intermediate-one-line-summary "Начално ниво плюс лексикален обхват")
-  (intermediate-student/lambda "Междинно ниво плюс λ-изрази")
   (intermediate/lambda-one-line-summary "Междинно ниво плюс функции от по-висок ред")
-  (advanced-student "Ниво за напреднали")
   (advanced-one-line-summary "Междинно ниво плюс λ-изрази и промяна")
-  (how-to-design-programs "Как да проектираме програми") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Доста пълно ниво")
   (pretty-big-scheme-one-line-summary "Добавени са синтаксиса и функциите от езиците в „HtDP“ (Как да проектираме програми), mzscheme и mred/mred")
   (r5rs-language-name "R5RS")

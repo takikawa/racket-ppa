@@ -909,17 +909,11 @@ please adhere to these guidelines:
   (please-select-a-language "Vælg et sprog")
   
   ;;; languages
-  (beginning-student "Begynder")
   (beginning-one-line-summary "define, cond, strukturer, konstanter og primitiver")
-  (beginning-student/abbrev "Begynder med listeforkortelser")
   (beginning/abbrev-one-line-summary "Begynder, men udskrivning anvender listenotation i REPL")
-  (intermediate-student "Øvet")
   (intermediate-one-line-summary "Begynder med leksikalske virkefelter")
-  (intermediate-student/lambda "Øvet med lambda")
   (intermediate/lambda-one-line-summary "Øvet med funktioner af højere orden")
-  (advanced-student "Rutineret")
   (advanced-one-line-summary "Øvet med lambda og mutation")
-  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Temmelig omfattende Racket")
   (pretty-big-scheme-one-line-summary "Grafisk, med mange standardbiblioteker")
   (r5rs-language-name "R5RS")
