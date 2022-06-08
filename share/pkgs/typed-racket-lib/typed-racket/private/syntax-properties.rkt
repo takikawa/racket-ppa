@@ -60,6 +60,7 @@
   (type-ascription type-ascription)
   (type-inst type-inst)
   (row-inst row-inst)
+  (st-proc-ty st-proc-ty)
   (type-label type-label)
   (optional-non-immediate-arg optional-non-immediate-arg)
   (optional-immediate-arg optional-immediate-arg)
@@ -69,6 +70,7 @@
   (exn-body typechecker:exn-body #:mark)
   (exn-handlers typechecker:exn-handlers #:mark)
   (struct-info struct-info)
+  (rst-arg rst-arg)
   (opt-lambda opt-lambda)
   (kw-lambda kw-lambda)
   ; mark syntax objects for formal parameters in polymorphic lambdas forms.

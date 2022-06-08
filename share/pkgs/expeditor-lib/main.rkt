@@ -299,7 +299,7 @@
                                      (raise exn))])
         (dispatch ee entry base-dispatch-table)))))
 
-(define (ee-prompt-and-read ee n)
+(define (ee-prompt-and-read ee n wps)
   (unless (and (integer? n) (>= n 0))
     (error 'ee-prompt-and-read
            "nesting level ~s is not a positive integer"
@@ -313,7 +313,7 @@
         (fresh-line (current-output-port))
         (flush-output (current-output-port))
         (set-eestate-prompt! ee
-          (let ([wps ">"])
+          (let ([wps wps])
             (if (string=? wps "")
                 ""
                 (string-append
@@ -1440,11 +1440,14 @@
 (define (expeditor-close ee)
   (ee-get-history ee))
 
-(define (expeditor-read ee)
-  (ee-prompt-and-read ee 1))
+(define (expeditor-read ee #:prompt [prompt ">"])
+  (unless (eestate? ee) (raise-argument-error 'expeditor-read "eestate?" ee))
+  (unless (string? prompt) (raise-argument-error 'expeditor-read "string?" prompt))
+  (ee-prompt-and-read ee 1 prompt))
 
 (define call-with-expeditor
-  (lambda (proc)
+  (lambda (proc #:prompt [prompt ">"])
+    (unless (string? prompt) (raise-argument-error 'call-with-expeditor "string?" prompt))
     (let ([ee #f])
       (define (expeditor-prompt-and-read n)
         (if (cond
@@ -1455,7 +1458,7 @@
                     (set! ee new-ee)
                     #t)]
               [else (set! ee 'failed) #f])
-            (ee-prompt-and-read ee n)
+            (ee-prompt-and-read ee n prompt)
             (default-prompt-and-read n)))
       (let ([val* (call-with-values
                    (lambda ()

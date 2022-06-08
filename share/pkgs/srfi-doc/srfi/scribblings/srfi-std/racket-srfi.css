@@ -1,0 +1,87 @@
+/*
+  This is a substitute for "srfi.css" from
+  https://github.com/scheme-requests-for-implementation/srfi-common
+*/
+@import "../../scribble.css";
+@import "../../manual-style.css";
+@import "../../manual-racket.css";
+/* NB doc-site.css is imported at the end of this file */
+
+a.eponymous {
+    /* based on upstream srfi.css */
+    font-family: 'Fira-Mono', monospace;
+    overflow-wrap: break-word;
+    word-break: break-all;
+    word-wrap: break-word;
+}
+body > p:first-of-type {
+    /* this is the SRFI author */
+    font-family: 'Fira', sans-serif;
+    font-size: 1.3em;
+}
+body {
+    /* like .maincolumn from manual-style.css */
+    width: auto;
+    margin-top: 4rem;
+    margin-left: 17rem;
+    margin-right: 2rem;
+    margin-bottom: 10rem; /* to avoid fixed bottom nav bar */
+    max-width: 700px;
+    min-width: 370px; /* below this size, code samples don't fit */
+}
+@media (max-width:720px) {
+    /* adapt to narrow screens, like .maincolumn in manual-style.css */
+    body {
+        margin-left: 1em;
+        margin-top: 7rem;
+        margin-bottom: 0rem;
+    }
+}
+.refpara.racket-srfi-note .refcolumn {
+    /* Overrides @media rule to put .refcolumn in the margin on wide
+       screens. This is necessary because some SRFIs (e.g. 14) include
+       inline stylesheets that interfere with the way it tries to use
+       `float`.
+   */
+    margin: inherit;
+    float: inherit;
+    clear: inherit;
+    width: inherit;
+}
+h1 {
+    /* like h2 from manual-style.css */
+    font-family: 'Cooper-Hewitt';
+    font-size: 2.3rem;
+    font-weight: bold;
+    line-height: 1.2;
+    width: 90%;
+}
+h2 {
+    /* like h3 -- h8 in manual-style.css */
+    margin-top: 2em;
+    padding-top: 0.1em;
+    margin-bottom: 0.75em;
+    font-size: 2rem;
+}
+h3, h4, h5, h6, h7, h8 {
+    border: none;
+}
+span.antispam {
+    display: none;
+}
+pre, dl, dd, ol, ul {
+  /* like p from manual-style.css */
+  margin-bottom: 1em;
+}
+li {
+  /* slightly tighter than p */
+  margin-bottom: 0.6em;
+}
+.srfi-plt-extension {
+    /* like the background color for .boxed (blue boxes),
+       but without the gradient */
+    background-color: hsl(216, 78%, 95%);
+}
+
+/* Goes last, so it can override everything. */
+@import "../../doc-site.css";

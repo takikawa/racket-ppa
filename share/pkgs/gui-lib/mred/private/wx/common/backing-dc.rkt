@@ -3,6 +3,7 @@
          racket/draw/private/dc
          racket/draw/private/bitmap-dc
          racket/draw/private/bitmap
+         racket/draw/private/color
          racket/draw/private/local
          racket/draw/private/record-dc
          racket/draw/unsafe/cairo
@@ -39,6 +40,8 @@
   cancel-delay
   end-delay)
 
+(define black-color (send the-color-database find-color "black"))
+
 (define backing-dc%
   (class (record-dc-mixin (dc-mixin bitmap-dc-backend%))
     (init transparent?)
@@ -64,6 +67,14 @@
 
     (define/override (ok?) #t)
 
+    (define/override (draw-bitmap src dest-x dest-y [style 'solid] [color black-color] [mask #f])
+      (when (and (src . is-a? . bitmap%)
+                 ((* (send src get-width) (send src get-height))
+                  . > . (* 32 32)))
+        ;; disable recording
+        (set-recording-limit -1))
+      (super draw-bitmap src dest-x dest-y style color mask))
+
     ;; Override this method to get the right size
     (define/public (get-backing-size xb yb)
       (set-box! xb 1)
@@ -77,13 +88,14 @@
 
     ;; called with a procedure that is applied to a bitmap;
     ;;  returns #f if there's nothing to flush
-    (define/public (on-backing-flush proc)
+    (define/public (on-backing-flush proc [nothing-to-draw-proc void])
       (cond
        [(not retained-cr) #f]
        [(positive? retained-counter) 
-        (unless nada?
-          (proc (or (get-recorded-command)
-                    (internal-get-bitmap))))
+        (if nada?
+	    (nothing-to-draw-proc)
+            (proc (or (get-recorded-command)
+                      (internal-get-bitmap))))
         #t]
        [else 
         (reset-backing-retained proc)

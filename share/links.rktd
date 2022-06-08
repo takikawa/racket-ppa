@@ -184,7 +184,6 @@
  (root (#"pkgs" #"slideshow-exe"))
  (root (#"pkgs" #"slideshow-plugin"))
  (root (#"pkgs" #"srfi-doc"))
- (root (#"pkgs" #"srfi-doc-nonfree"))
  (root (#"pkgs" #"syntax-color-doc"))
  (root (#"pkgs" #"web-server-lib"))
  (root (#"pkgs" #"unix-socket-lib"))

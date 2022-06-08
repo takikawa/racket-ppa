@@ -97,7 +97,7 @@ sich also auf das @racket[a] aus dem @racket[let*]-Ausdruck, nicht das
 
 @section[#:tag "pattern-matching-vanilla"]{Pattern-Matching}
 
-@defform/none[(match expr (pattern expr) ...)
+@defform/none[(match expr (pattern definition ... expr) ...)
 		#:grammar [(pattern
 		                ...
 				empty

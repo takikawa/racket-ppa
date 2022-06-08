@@ -1843,7 +1843,10 @@ TODO
            (define name (send definitions-text get-port-name))
            (define settings
              (drracket:language-configuration:language-settings-settings user-language-settings))
-           (define prog-port (open-input-string (send lang get-auto-text settings) name))
+           (define hash-lang-str (or (fetch-hash-lang-str definitions-text)
+                                     (send lang get-auto-text settings)))
+           (when (regexp-match? #rx"^#lang pollen" hash-lang-str) (set! hash-lang-str "#lang racket/base"))
+           (define prog-port (open-input-string hash-lang-str name))
            (port-count-lines! prog-port)
            (parameterize ([module-language-initial-run #t])
              (evaluate-from-port
@@ -2416,3 +2419,9 @@ TODO
                   (make-object string-snip% "c"))])
     (check-equal? (simplify-history-element in #t)
                   (old-conversion-code in))))
+
+(define (fetch-hash-lang-str definitions-text)
+  (define the-irl (send definitions-text get-irl))
+  (define-values (before after)
+    (get-read-language-port-start+end (send definitions-text get-irl)))
+  (and after (send definitions-text get-text 0 after)))
