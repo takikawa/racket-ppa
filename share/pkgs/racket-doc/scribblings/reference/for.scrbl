@@ -19,7 +19,9 @@ The @racket[for] iteration forms are based on SRFI-42
                            [(id ...) seq-expr]
                            (code:line #:when guard-expr)
                            (code:line #:unless guard-expr)
-                           break-clause]
+                           (code:line #:do [do-body ...])
+                           break-clause
+                           (code:line #:splice (splicing-id . form))]
                [break-clause (code:line #:break guard-expr)
                              (code:line #:final guard-expr)]
                [body-or-break body
@@ -56,7 +58,7 @@ a sequence containing a single element. All of the @racket[id]s must
 be distinct according to @racket[bound-identifier=?].
 
 If any @racket[for-clause] has the form @racket[#:when guard-expr],
-then only the preceding clauses (containing no @racket[#:when] or @racket[#:unless])
+then only the preceding clauses (containing no @racket[#:when], @racket[#:unless], or @racket[#:do])
 determine iteration as above, and the @racket[body] is effectively
 wrapped as
 
@@ -65,9 +67,20 @@ wrapped as
   (for (for-clause ...) body ...+))
 ]
 
-using the remaining @racket[for-clauses]. A @racket[for-clause] of
+using the remaining @racket[for-clause]s. A @racket[for-clause] of
 the form @racket[#:unless guard-expr] corresponds to the same transformation
-with @racket[unless] in place of @racket[when].
+with @racket[unless] in place of @racket[when]. A @racket[for-clause] of
+the form @racket[#:do [do-body ...]] similarly creates nesting and
+corresponds to
+
+@racketblock[
+(let ()
+  do-body ...
+  (for (for-clause ...) body ...+))
+]
+
+where the @racket[do-body] forms may introduce definitions that are
+visible in the remaining @racket[for-clause]s.
 
 A @racket[#:break guard-expr] clause is similar to a
 @racket[#:unless guard-expr] clause, but when @racket[#:break]
@@ -81,6 +94,19 @@ sequence and at most one more evaluation of the following
 iteration and preventing later @racket[body] evaluations, a
 @racket[#:break guard-expr] or @racket[#:final guard-expr]
 clause starts a new internal-definition context.
+
+A @racket[#:splice (splicing-id . form)] clause is replaced by the
+sequence of forms that are produced by expanding @racket[(splicing-id
+. form)], where @racket[splicing-id] is bound using
+@racket[define-splicing-for-clause-syntax]. The binding context of
+that expansion includes previous binding from any clause preceding
+both the @racket[#:splice] form and a @racket[#:when],
+@racket[#:unless], @racket[#:do], @racket[#:break], or
+@racket[#:final] form. The result of a @racket[#:splice] expansion can
+include more @racket[#:splice] forms to further interleave clause
+binding and expansion. Support for @racket[#:splicing] clauses is
+intended less for direct use in source @racket[for] forms than for
+building new forms that expand to @racket[for].
 
 In the case of @tech{list} and @tech{stream} sequences, the
 @racket[for] form itself does not keep each element reachable. If a
@@ -104,6 +130,10 @@ property; in most cases this improves performance.
       #:when (odd? i)
       [k #2(#t #f)])
   (display (list i j k)))
+(for ([i '(1 2 3)]
+      #:do [(define neg-i (* i -1))]
+      [j (list neg-i 0 i)])
+  (display (list j)))
 (for ([(i j) #hash(("a" . 1) ("b" . 20))])
   (display (list i j)))
 (for ([i '(1 2 3)]
@@ -128,7 +158,9 @@ property; in most cases this improves performance.
 ]
 
 @history[#:changed "6.7.0.4" @elem{Added support for the optional second result.}
-         #:changed "7.8.0.11" @elem{Added support for implicit optimization.}]}
+         #:changed "7.8.0.11" @elem{Added support for implicit optimization.}
+         #:changed "8.4.0.2" @elem{Added @racket[#:do].}
+         #:changed "8.4.0.3" @elem{Added @racket[#:splice].}]}
 
 @defform[(for/list (for-clause ...) body-or-break ... body)]{ Iterates like
 @racket[for], but that the last expression in the @racket[body]s must
@@ -812,7 +844,33 @@ returns its argument.
 @history[#:changed "8.2.0.4" @elem{Changed to just return @racket[stx] instead
                                    of returning ``armed'' syntax.}]}
 
+@defform[(define-splicing-for-clause-syntax id proc-expr)]{
 
+Binds @racket[id] for reference via a @racket[#:splicing] clause in a
+@racket[for] form. The @racket[proc-expr] expression is evaluated in
+@tech{phase level} 1, and it must produce a procedure that accepts a
+syntax object and returns a syntax object.
+
+The procedure's input is a syntax object that appears after
+@racket[#:splicing]. The result syntax object must be a parenthesized
+sequence of forms, and the forms are spliced in place of the
+@racket[#:splicing] clause in the enclosing @racket[for] form.
+
+@mz-examples[#:eval for-eval
+(define-splicing-for-clause-syntax cross3
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ n m) #'([n (in-range 3)]
+                  #:when #t
+                  [m (in-range 3)])])))
+
+(for (#:splice (cross3 n m))
+  (println (list n m)))
+]
+
+@history[#:added "8.4.0.3"]}
+
+@;------------------------------------------------------------------------
 @section{Do Loops}
 
 @defform/subs[(do ([id init-expr step-expr-maybe] ...)

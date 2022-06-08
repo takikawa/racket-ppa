@@ -502,12 +502,17 @@
         (collect-maximum-generation (+ (random 254) 1))))))
 
 (define windows?
-  (if (memq (machine-type) '(i3nt ti3nt a6nt ta6nt))
+  (if (memq (machine-type) '(i3nt ti3nt a6nt ta6nt arm64nt tarm64nt))
       (lambda () #t)
       (lambda () #f)))
 
 (define embedded?
   (lambda () #f))
+
+(define pb?
+  (if (memq (machine-type) '(pb tpb pb32 tpb32))
+      (lambda () #t)
+      (lambda () #f)))
 
 (define ($record->vector x)
   (let* ([rtd (#%$record-type-descriptor x)]
