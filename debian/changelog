@@ -1,7 +1,9 @@
-racket (8.5-2) unstable; urgency=medium
+racket (8.5+dfsg1-1) unstable; urgency=medium
 
   * Bug fix: "should no longer recommend libssl1.1", thanks to Vincent
     Lefevre (Closes: #1012733).
+  * Remove dubious files (as defined by zlib source package) from embedded
+    zlib.
 
  -- David Bremner <bremner@debian.org>  Mon, 13 Jun 2022 08:29:09 -0300
 
