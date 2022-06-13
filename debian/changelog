@@ -1,3 +1,10 @@
+racket (8.5-2) unstable; urgency=medium
+
+  * Bug fix: "should no longer recommend libssl1.1", thanks to Vincent
+    Lefevre (Closes: #1012733).
+
+ -- David Bremner <bremner@debian.org>  Mon, 13 Jun 2022 08:29:09 -0300
+
 racket (8.5-1) unstable; urgency=medium
 
   * New upstream release
