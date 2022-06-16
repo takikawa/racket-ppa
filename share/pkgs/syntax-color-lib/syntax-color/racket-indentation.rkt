@@ -7,14 +7,16 @@
 
 (provide
  (contract-out
+  ;; the test suite for `racket-amount-to-indent` is in the framework's tests
+  ;; run it (and other tests) with `raco test -l framework/tests/racket`
   [racket-amount-to-indent (->* ((is-a?/c color-textoid<%>)
                                  exact-nonnegative-integer?)
                                 (#:head-sexp-type (-> string? (or/c #f 'lambda 'define 'begin 'for/fold 'other))
                                  #:graphical-width (or/c #f (-> (is-a?/c color-textoid<%>)
                                                                 exact-nonnegative-integer?
                                                                 exact-nonnegative-integer?
-                                                                exact-nonnegative-integer?)))
-                                (or/c #f exact-nonnegative-integer?))]
+                                                                (or/c #f exact-nonnegative-integer?))))
+                                exact-nonnegative-integer?)]
   [racket-tabify-table->head-sexp-type (-> (list/c hash?
                                                    (or/c #f regexp?)
                                                    (or/c #f regexp?)
@@ -28,6 +30,7 @@
                                                    (racket-tabify-table->head-sexp-type
                                                     racket-tabify-default-table)]
                                  #:graphical-width [graphical-width #f])
+
   (with-method ([last-position (t last-position)]
                 [get-character (t get-character)]
                 [get-text (t get-text)]
@@ -37,30 +40,31 @@
                 [backward-match (t backward-match)]
                 [backward-containing-sexp (t backward-containing-sexp)]
                 [get-backward-navigation-limit (t get-backward-navigation-limit)])
-    (define (find-offset start-pos)
-      (define tab-char? #f)
-      (define end-pos
-        (let loop ([p start-pos])
-          (let ([c (get-character p)])
-            (cond
-              [(char=? c #\tab)
-               (set! tab-char? #t)
-               (loop (add1 p))]
-              [(char=? c #\newline)
-               p]
-              [(char-whitespace? c)
-               (loop (add1 p))]
-              [else
-               p]))))
+
+    (define (indent-first-arg start-pos)
+      (define end-pos (skip-forward-past-non-newline-whitespace start-pos))
       (define gwidth
         (cond
           [graphical-width
-           (graphical-width t start-pos end-pos)]
+           (or (graphical-width t start-pos end-pos)
+               (- end-pos start-pos))]
           [else
            ;; if there is no display available, approximate the graphical
            ;; width on the assumption that we are using a fixed-width font
            (- end-pos start-pos)]))
-      (values gwidth end-pos tab-char?))
+      gwidth)
+    (define (skip-forward-past-non-newline-whitespace start-pos)
+      (let loop ([p start-pos])
+        (let ([c (get-character p)])
+          (cond
+            [(char=? c #\tab)
+             (loop (add1 p))]
+            [(char=? c #\newline)
+             p]
+            [(char-whitespace? c)
+             (loop (add1 p))]
+            [else
+             p]))))
 
     ;; returns #t if `pos` is in a symbol (or keyword) that consists entirely
     ;; of hyphens and has at least three hyphens; returns #f otherwise
@@ -103,11 +107,12 @@
     (define limit (get-backward-navigation-limit pos))
     (define last-pos (last-position))
     (define para (position-paragraph pos))
+    (define para-start (paragraph-start-position para))
     (define is-tabbable?
       (and (> para 0)
-           (not (memq (classify-position (- (paragraph-start-position para) 1))
+           (not (memq (classify-position (- para-start 1))
                       '(comment string error)))))
-    (define end (if is-tabbable? (paragraph-start-position para) 0))
+    (define end (if is-tabbable? para-start 0))
 
     ;; "contains" is the start of the initial sub-S-exp
     ;;  in the S-exp that contains "pos". If pos is outside
@@ -174,10 +179,6 @@
       (define proc-name (get-proc))
       (equal? proc-name 'for/fold))
 
-    (define (indent-first-arg start)
-      (define-values (gwidth curr-offset tab-char?) (find-offset start))
-      gwidth)
-
     (when (and is-tabbable?
                (not (char=? (get-character (sub1 end))
                             #\newline)))
@@ -185,20 +186,21 @@
       ;; but it seems like this shouldn't happen, because
       ;; para > 0, and `end` is the start of the paragraph,
       ;; so the revious character should be a newline
-      (send t insert #\newline (paragraph-start-position para)))
+      (send t insert #\newline para-start))
 
     (define amt-to-indent
       (cond
         [(not is-tabbable?)
-         (if (= para 0)
-             0
-             #f)]
-        [(let-values ([(gwidth real-start tab-char?) (find-offset end)])
-           (and (<= (+ 3 real-start) (last-position))
-                (string=? ";;;"
-                          (get-text real-start
-                                    (+ 2 real-start)))))
-         #f]
+         (cond
+           [(= para 0) 0]
+           [else
+            (define first-non-whitespace
+              (let loop ([p para-start])
+                (define c (get-character p))
+                (cond
+                  [(char-whitespace? c) (loop (+ p 1))]
+                  [else p])))
+            (visual-offset first-non-whitespace)])]
         [(not contains)
          ;; Something went wrong matching. Should we get here?
          0]

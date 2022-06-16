@@ -411,11 +411,14 @@
           (|#%app| default)
           (raise (|#%app|
                   exn:fail:contract:arity
-                  (string-append (symbol->string who)
-                                 ": arity mismatch for failure procedure;\n"
-                                 " given procedure does not accept zero arguments\n"
-                                 "  procedure: "
-                                 (error-value->string default))
+                  (error-message->adjusted-string
+                   who primitive-realm
+                   (string-append
+                    "arity mismatch for failure procedure;\n"
+                    " given procedure does not accept zero arguments\n"
+                    "  procedure: "
+                    (error-value->string default))
+                   primitive-realm)
                   (current-continuation-marks))))
       default))
 
@@ -1021,8 +1024,8 @@
                             (lambda (procs ht k none-v)
                               (let-values ([(new-k _) (|#%app| (hash-procs-ref procs) ht k)])
                                 (values new-k
-                                        (lambda (ht k none-v)
-                                          (|#%app| (hash-procs-key procs) ht k)))))
+                                        (lambda (ht given-k actual-k)
+                                          (|#%app| (hash-procs-key procs) ht actual-k)))))
                             hash-procs-ref
                             ht k none))
 

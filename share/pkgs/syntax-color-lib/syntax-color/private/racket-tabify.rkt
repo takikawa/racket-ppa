@@ -32,7 +32,8 @@
               '(for/fold for/fold: for*/fold for*/fold:
                  for/lists for/lists: for*/lists for*/lists:))
     (for-each (λ (x) (hash-set! defaults-ht x 'define))
-              '(struct local struct: pdefine: match-define match-define-values))
+              '(struct local struct: pdefine: match-define match-define-values
+                 pattern))
     (for-each (λ (x) (hash-set! defaults-ht x 'begin))
               '(case-lambda case-lambda: pcase-lambda:
                             match-lambda match-lambda*

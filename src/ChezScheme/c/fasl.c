@@ -276,7 +276,7 @@ static U32 adjust_delay_inst PROTO((U32 delay_inst, U32 *old_call_addr, U32 *new
 static INT sparc64_set_lit_only PROTO((void *address, uptr item, I32 destreg));
 static void sparc64_set_literal PROTO((void *address, uptr item));
 #endif /* SPARC64 */
-#ifdef PORTABLE_BYTECODE_BIGENDIAN
+#ifdef PORTABLE_BYTECODE_SWAPENDIAN
 static void swap_code_endian(octet *code, uptr len);
 #endif
 
@@ -1071,7 +1071,7 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
               S_G.profile_counters = Scons(S_weak_cons(co, pinfos), S_G.profile_counters);
             }
             code_bytesin((octet *)&CODEIT(co, 0), n, f);
-#ifdef PORTABLE_BYTECODE_BIGENDIAN
+#ifdef PORTABLE_BYTECODE_SWAPENDIAN
             swap_code_endian((octet *)&CODEIT(co, 0), n);
 #endif
             m = uptrin(f);
@@ -1555,39 +1555,12 @@ ptr S_get_code_obj(typ, p, n, o) IFASLCODE typ; iptr n, o; ptr p; {
 
 #ifdef PORTABLE_BYTECODE
 
-/* Address pieces in a movz,movk,movk,movk sequence are upper 16 bits */
-#define ADDRESS_BITS_SHIFT 16
-#define ADDRESS_BITS_MASK  ((U32)0xFFFF0000)
-#define DEST_REG_MASK      0xF00
-
 static void pb_set_abs(void *address, uptr item) {
-  /* First word can have an arbitrary value due to vfasl offset
-     storage, so get the target register from the end: */
-#if ptr_bytes == 8  
-  int dest_reg = ((U32 *)address)[3] & DEST_REG_MASK;
-#else
-  int dest_reg = ((U32 *)address)[1] & DEST_REG_MASK;
-#endif
-
-  /* pb_link is the same as pb_mov16_pb_zero_bits_pb_shift0, but with
-     a promise of the subsequent instructions to load a full word */
-
-  ((U32 *)address)[0] = (pb_link | dest_reg | ((item & 0xFFFF) << ADDRESS_BITS_SHIFT));
-  ((U32 *)address)[1] = (pb_mov16_pb_keep_bits_pb_shift1 | dest_reg | (((item >> 16) & 0xFFFF) << ADDRESS_BITS_SHIFT));
-#if ptr_bytes == 8  
-  ((U32 *)address)[2] = (pb_mov16_pb_keep_bits_pb_shift2 | dest_reg | (((item >> 32) & 0xFFFF) << ADDRESS_BITS_SHIFT));
-  ((U32 *)address)[3] = (pb_mov16_pb_keep_bits_pb_shift3 | dest_reg | (((item >> 48) & 0xFFFF) << ADDRESS_BITS_SHIFT));
-#endif
+  *(uptr *)address = item;
 }
 
 static uptr pb_get_abs(void *address) {
-  return ((uptr)((((U32 *)address)[0] & ADDRESS_BITS_MASK) >> ADDRESS_BITS_SHIFT)
-          | ((uptr)((((U32 *)address)[1] & ADDRESS_BITS_MASK) >> ADDRESS_BITS_SHIFT) << 16)
-#if ptr_bytes == 8          
-          | ((uptr)((((U32 *)address)[2] & ADDRESS_BITS_MASK) >> ADDRESS_BITS_SHIFT) << 32)
-          | ((uptr)((((U32 *)address)[3] & ADDRESS_BITS_MASK) >> ADDRESS_BITS_SHIFT) << 48)
-#endif
-          );
+  return *(uptr *)address;
 }
 
 #endif /* PORTABLE_BYTECODE */
@@ -1984,7 +1957,7 @@ static void sparc64_set_literal(address, item) void *address; uptr item; {
 }
 #endif /* SPARC64 */
 
-#ifdef PORTABLE_BYTECODE_BIGENDIAN
+#ifdef PORTABLE_BYTECODE_SWAPENDIAN
 typedef struct {
   octet *code;
   uptr size;
@@ -2028,6 +2001,13 @@ static void swap_code_endian(octet *code, uptr len)
       octet b = code[1];
       octet c = code[2];
       octet d = code[3];
+#if fasl_endianness_is_little
+      octet le_a = a, le_b = b, le_c = c, le_d = d;
+# define le_tag_offset -ptr_bytes
+#else
+      octet le_a = d, le_b = c, le_c = b, le_d = a;
+# define le_tag_offset -1
+#endif
       code[0] = d;
       code[1] = c;
       code[2] = b;
@@ -2036,9 +2016,9 @@ static void swap_code_endian(octet *code, uptr len)
       code += 4;
       len -= 4;
 
-      if (a == pb_adr) {
+      if (le_a == pb_adr) {
         /* delta can be negative for a mvlet-error reinstall of the return address */
-        iptr delta = (((iptr)d << (ptr_bits - 8)) >> (ptr_bits - 20)) + ((iptr)c << 4) + (b >> 4);
+        iptr delta = 4*((((iptr)le_d << (ptr_bits - 8)) >> (ptr_bits - 20)) + ((iptr)le_c << 4) + (le_b >> 4));
         if (delta > 0) {
           /* after a few more instructions, we'll hit
              a header where 64-bit values needs to be
@@ -2049,15 +2029,13 @@ static void swap_code_endian(octet *code, uptr len)
 
 	  if ((uptr)delta > len)
 	    S_error_abort("swap endian: delta goes past end");
-	  if (delta & 0x3)
-	    S_error_abort("swap endian: delta is not a multiple of 4");
 
-          if (after_rpheader[-8] & 0x1)
+          if (after_rpheader[le_tag_offset] & 0x1)
             header_size = size_rp_compact_header;
           else
             header_size = size_rp_header;
           rpheader = after_rpheader - header_size;
-
+          
 	  if (rpheader_stack_pos == rpheader_stack_size) {
 	    int new_size = (2 * rpheader_stack_size) + 16;
 	    rpheader_t *new_stack;

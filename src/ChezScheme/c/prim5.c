@@ -99,10 +99,13 @@ static ptr s_get_reloc PROTO((ptr co, IBOOL with_offsets));
 static s_thread_rv_t s_backdoor_thread_start PROTO((void *p));
 static iptr s_backdoor_thread PROTO((ptr p));
 static ptr s_threads PROTO((void));
-static void s_mutex_acquire PROTO((scheme_mutex_t *m));
-static ptr s_mutex_acquire_noblock PROTO((scheme_mutex_t *m));
-static void s_condition_broadcast PROTO((s_thread_cond_t *c));
-static void s_condition_signal PROTO((s_thread_cond_t *c));
+static void s_mutex_acquire PROTO((ptr m));
+static ptr s_mutex_acquire_noblock PROTO((ptr m));
+static void s_mutex_release PROTO((ptr m));
+static void s_condition_broadcast PROTO((ptr c));
+static void s_condition_signal PROTO((ptr c));
+static void s_condition_free PROTO((ptr c));
+static IBOOL s_condition_wait PROTO((ptr c, ptr m, ptr t));
 static void s_thread_preserve_ownership PROTO((ptr tc));
 #endif
 static void s_byte_copy(ptr src, iptr srcoff, ptr dst, iptr dstoff, iptr cnt);
@@ -125,6 +128,10 @@ static ptr s_iconv_to_string PROTO((uptr cd, ptr in, uptr i, uptr iend, ptr out,
 static ptr s_multibytetowidechar PROTO((unsigned cp, ptr inbv));
 static ptr s_widechartomultibyte PROTO((unsigned cp, ptr inbv));
 #endif
+#ifdef PORTABLE_BYTECODE
+static ptr s_separatorchar();
+#endif
+
 static ptr s_profile_counters PROTO((void));
 static ptr s_profile_release_counters PROTO((void));
 
@@ -242,7 +249,19 @@ static ptr s_make_immobile_vector(uptr len, ptr fill) {
 
 static ptr s_make_reference_bytevector(uptr len) {
   ptr b = S_bytevector2(get_thread_context(), len, space_reference_array);
-  memset(&BVIT(b, 0), 0, len);
+
+  /* In case of a dirty sweep at the current allocation site, we need
+     to clear any padding bytes, either internal or for alignment */
+  len = (len + ptr_bytes - 1) >> log2_ptr_bytes;
+#ifdef bytevector_pad_disp
+  *(ptr *)TO_VOIDP((uptr)b+bytevector_pad_disp) = FIX(0);
+  if (len & 1) len++;
+#else
+  if (!(len & 1)) len++;
+#endif
+
+  memset(&BVIT(b, 0), 0, len << log2_ptr_bytes);
+
   return b;
 }
 
@@ -1540,12 +1559,12 @@ static s_thread_rv_t s_backdoor_thread_start(p) void *p; {
   display("backdoor thread started\n")
   (void) Sactivate_thread();
   display("thread activated\n")
-  Scall0((ptr)Sunbox(p));
+  Scall0((ptr)Sunbox(TO_PTR(p)));
   (void) Sdeactivate_thread();
   display("thread deactivated\n")
   (void) Sactivate_thread();
   display("thread reeactivated\n")
-  Scall0((ptr)Sunbox(p));
+  Scall0((ptr)Sunbox(TO_PTR(p)));
   Sdestroy_thread();
   display("thread destroyed\n")
   s_thread_return;
@@ -1553,7 +1572,7 @@ static s_thread_rv_t s_backdoor_thread_start(p) void *p; {
 
 static iptr s_backdoor_thread(p) ptr p; {
   display("creating thread\n");
-  return s_thread_create(s_backdoor_thread_start, (void *)p);
+  return s_thread_create(s_backdoor_thread_start, TO_VOIDP(p));
 }
 
 static ptr s_threads() {
@@ -1564,7 +1583,8 @@ static ptr s_threads() {
   return ts;
 }
 
-static void s_mutex_acquire(m) scheme_mutex_t *m; {
+static void s_mutex_acquire(m_p) ptr m_p; {
+  scheme_mutex_t *m = TO_VOIDP(m_p);
   ptr tc = get_thread_context();
 
   if (m == &S_tc_mutex) {
@@ -1583,17 +1603,33 @@ static void s_mutex_acquire(m) scheme_mutex_t *m; {
   }
 }
 
-static ptr s_mutex_acquire_noblock(m) scheme_mutex_t *m; {
+static ptr s_mutex_acquire_noblock(m_p) ptr m_p; {
+  scheme_mutex_t *m = TO_VOIDP(m_p);
   return S_mutex_tryacquire(m) == 0 ? Strue : Sfalse;
 }
 
-static void s_condition_broadcast(s_thread_cond_t *c) {
+static void s_mutex_release(ptr m) {
+  S_mutex_release(TO_VOIDP(m));
+}
+
+static void s_condition_broadcast(ptr c_p) {
+  s_thread_cond_t *c = TO_VOIDP(c_p);
   s_thread_cond_broadcast(c);
 }
 
-static void s_condition_signal(s_thread_cond_t *c) {
+static void s_condition_signal(ptr c_p) {
+  s_thread_cond_t *c = TO_VOIDP(c_p);
   s_thread_cond_signal(c);
 }
+
+static void s_condition_free(ptr c) {
+  S_condition_free(TO_VOIDP(c));
+}
+
+static IBOOL s_condition_wait(ptr c, ptr m, ptr t) {
+  return S_condition_wait(TO_VOIDP(c), TO_VOIDP(m), t);
+}
+
 
 /* called with tc mutex held */
 static void s_thread_preserve_ownership(ptr tc) {
@@ -1675,13 +1711,13 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)backdoor_thread", (void *)s_backdoor_thread);
     Sforeign_symbol("(cs)threads", (void *)s_threads);
     Sforeign_symbol("(cs)mutex_acquire", (void *)s_mutex_acquire);
-    Sforeign_symbol("(cs)mutex_release", (void *)S_mutex_release);
+    Sforeign_symbol("(cs)mutex_release", (void *)s_mutex_release);
     Sforeign_symbol("(cs)mutex_acquire_noblock", (void *)s_mutex_acquire_noblock);
     Sforeign_symbol("(cs)make_condition", (void *)S_make_condition);
-    Sforeign_symbol("(cs)condition_free", (void *)S_condition_free);
+    Sforeign_symbol("(cs)condition_free", (void *)s_condition_free);
     Sforeign_symbol("(cs)condition_broadcast", (void *)s_condition_broadcast);
     Sforeign_symbol("(cs)condition_signal", (void *)s_condition_signal);
-    Sforeign_symbol("(cs)condition_wait", (void *)S_condition_wait);
+    Sforeign_symbol("(cs)condition_wait", (void *)s_condition_wait);
     Sforeign_symbol("(cs)thread_preserve_ownership", (void *)s_thread_preserve_ownership);
 #endif
     Sforeign_symbol("(cs)s_addr_in_heap", (void *)s_addr_in_heap);
@@ -1891,6 +1927,9 @@ void S_prim5_init() {
 #ifdef WIN32
     Sforeign_symbol("(cs)s_multibytetowidechar", (void *)s_multibytetowidechar);
     Sforeign_symbol("(cs)s_widechartomultibyte", (void *)s_widechartomultibyte);
+#endif
+#ifdef PORTABLE_BYTECODE
+    Sforeign_symbol("(cs)s_separatorchar", (void *)s_separatorchar);
 #endif
     Sforeign_symbol("(cs)s_profile_counters", (void *)s_profile_counters);
     Sforeign_symbol("(cs)s_profile_release_counters", (void *)s_profile_release_counters);
@@ -2128,9 +2167,11 @@ static void s_free(uptr addr) {
 #ifdef FEATURE_ICONV
 #ifdef DISABLE_ICONV
 # define iconv_t int
-#define ICONV_OPEN(to, from) -1
-#define ICONV(cd, in, inb, out, outb) -1
-#define ICONV_CLOSE(cd) -1
+#define ICONV_OPEN(to, from) (use_sink(to), use_sink(from), -1)
+#define ICONV(cd, in, inb, out, outb) (use_sinki(cd), use_sink(in), use_sink(inb), use_sink(out), use_sink(outb), -1)
+#define ICONV_CLOSE(cd) (use_sinki(cd), -1)
+static void use_sink(UNUSED const void *p) { }
+static void use_sinki(UNUSED int i) { }
 #elif defined(WIN32)
 typedef void *iconv_t;
 typedef iconv_t (*iconv_open_ft)(const char *tocode, const char *fromcode);
@@ -2321,3 +2362,13 @@ static ptr s_widechartomultibyte(unsigned cp, ptr inbv) {
   return outbv;  
 }
 #endif /* WIN32 */
+
+#ifdef PORTABLE_BYTECODE
+static ptr s_separatorchar() {
+#ifdef WIN32
+  return Schar(';');
+#else
+  return Schar(':');
+#endif
+}
+#endif
