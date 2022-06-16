@@ -1,3 +1,9 @@
+racket (8.5+dfsg1-1~bpo11+1) bullseye-backports; urgency=medium
+
+  * Rebuild for bullseye-backports.
+
+ -- David Bremner <bremner@debian.org>  Thu, 16 Jun 2022 10:53:55 -0300
+
 racket (8.5+dfsg1-1) unstable; urgency=medium
 
   * Bug fix: "should no longer recommend libssl1.1", thanks to Vincent
