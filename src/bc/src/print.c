@@ -159,6 +159,7 @@ static Scheme_Object *srcloc_path_to_string(Scheme_Object *p);
     || SCHEME_CHAPERONE_VECTORP(obj) \
     || SCHEME_FLVECTORP(obj) \
     || SCHEME_FXVECTORP(obj) \
+    || SCHEME_STENCIL_VECTORP(obj) \
     || (qk(pp->print_box, 1) && SCHEME_CHAPERONE_BOXP(obj)) \
     || (qk(pp->print_struct  \
 	   && SCHEME_CHAPERONE_STRUCTP(obj) \
@@ -524,6 +525,7 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
       || SCHEME_CHAPERONE_VECTORP(obj)
       || SCHEME_FLVECTORP(obj)
       || SCHEME_FXVECTORP(obj)
+      || SCHEME_STENCIL_VECTORP(obj)
       || (SCHEME_CHAPERONE_STRUCTP(obj)
           && ((pp->print_struct 
 	       && PRINTABLE_STRUCT(obj, pp))
@@ -583,6 +585,22 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
   } else if (SCHEME_FLVECTORP(obj) 
              || SCHEME_FXVECTORP(obj)) {
     res = CHECK_CHECK_HAS_UNQUOTE; /* escape for qq printing */
+  } else if (SCHEME_STENCIL_VECTORP(obj)) {
+    Scheme_Stencil_Vector *sv = (Scheme_Stencil_Vector *)obj;
+    int i, len;
+    Scheme_Object *v;
+    if (for_write > 1) for_write = 1;
+
+    len = scheme_stencil_vector_popcount(sv->mask);
+
+    res = 0;
+    for (i = 0; i < len; i++) {
+      v = sv->els[i];
+      res2 = check_cycles(v, for_write, ht, pp);
+      res |= res2;
+      if (res & CHECK_CHECK_HAS_CYCLE)
+	return res;
+    }
   } else if (SCHEME_CHAPERONE_STRUCTP(obj)) {
     if (scheme_is_writable_struct(obj)) {
       if (pp->print_unreadable) {
@@ -751,6 +769,20 @@ static int check_cycles_fast(Scheme_Object *obj, PrintParams *pp, int *fast_chec
 	break;
     }
     obj->type = t;
+  } else if (SCHEME_STENCIL_VECTORP(obj)) {
+    Scheme_Stencil_Vector *sv = (Scheme_Stencil_Vector *)obj;
+    int i, len;
+    len = scheme_stencil_vector_popcount(sv->mask);
+
+    if (write > 1) write = 1;
+
+    obj->type = -t;
+    for (i = 0; i < len; i++) {
+      cycle = check_cycles_fast(sv->els[i], pp, fast_checker_counter, write);
+      if (cycle)
+	break;
+    }
+    obj->type = t;
   } else if (SAME_TYPE(t, scheme_structure_type)
 	     || SAME_TYPE(t, scheme_proc_struct_type)) {
     if (scheme_is_writable_struct(obj)) {
@@ -888,6 +920,17 @@ static void setup_graph_table(Scheme_Object *obj, int for_write, Scheme_Hash_Tab
       else
         v = scheme_chaperone_vector_ref(obj, i);
       setup_graph_table(v, for_write, ht, counter, pp);
+    }
+  } else if (SCHEME_STENCIL_VECTORP(obj)) {
+    Scheme_Stencil_Vector *sv = (Scheme_Stencil_Vector *)obj;
+    int i, len;
+    Scheme_Object *v;
+
+    len = scheme_stencil_vector_popcount(sv->mask);
+    if (for_write > 1) for_write = 1;
+
+    for (i = 0; i < len; i++) {
+      setup_graph_table(sv->els[i], for_write, ht, counter, pp);
     }
   } else if (pp && SCHEME_CHAPERONE_STRUCTP(obj)) { /* got here => printable */
     if (scheme_is_writable_struct(obj)) {
@@ -2038,6 +2081,28 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       print_fxvector(obj, notdisplay, compact, ht, mt, pp, 0);
       closed = 1;
     }
+  else if (SCHEME_STENCIL_VECTORP(obj))
+    {
+      Scheme_Stencil_Vector *sv = (Scheme_Stencil_Vector *)obj;
+      intptr_t len, i;
+      int sub_notdisplay = ((notdisplay > 1) ? 1 : notdisplay);
+      
+      len = scheme_stencil_vector_popcount(sv->mask);
+
+      print_utf8_string(pp, "#<stencil ", 0, 10);
+      sprintf(quick_buffer, "%" PRIdPTR "", sv->mask);
+      print_utf8_string(pp, quick_buffer, 0, -1);
+      if (sv->mask != 0)
+        print_utf8_string(pp, ":", 0, 1);
+
+      for (i = 0; i < len; i++) {
+        print_utf8_string(pp, " ", 0, 1);
+        print(sv->els[i], sub_notdisplay, compact, ht, mt, pp);
+      }
+
+      print_utf8_string(pp, ">", 0, 1);
+      closed = 1;
+    }
   else if ((compact || pp->print_box) && SCHEME_CHAPERONE_BOXP(obj))
     {
       if (compact && !pp->print_box) {
@@ -2081,6 +2146,9 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	if ((SCHEME_HASHTP(obj) && scheme_is_hash_table_equal(obj))
             || (SCHEME_HASHTRP(obj) && scheme_is_hash_tree_equal(obj)))
 	  print_compact_number(pp, 1);
+	else if ((SCHEME_HASHTP(obj) && scheme_is_hash_table_equal_always(obj))
+	         || (SCHEME_HASHTRP(obj) && scheme_is_hash_tree_equal_always(obj)))
+	  print_compact_number(pp, 3);
 	else if ((SCHEME_HASHTP(obj) && scheme_is_hash_table_eqv(obj))
                  || (SCHEME_HASHTRP(obj) && scheme_is_hash_tree_eqv(obj)))
 	  print_compact_number(pp, 2);
@@ -2096,6 +2164,8 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
           if (!scheme_is_hash_table_equal(obj)) {
             if (scheme_is_hash_table_eqv(obj))
               print_utf8_string(pp, "eqv", 0, 3);
+            else if (scheme_is_hash_table_equal_always(obj))
+              print_utf8_string(pp, "alw", 0, 3);
             else
               print_utf8_string(pp, "eq", 0, 2);
           }
@@ -2103,6 +2173,8 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
           if (!scheme_is_hash_tree_equal(obj)) {
             if (scheme_is_hash_tree_eqv(obj))
               print_utf8_string(pp, "eqv", 0, 3);
+            else if (scheme_is_hash_tree_equal_always(obj))
+              print_utf8_string(pp, "alw", 0, 3);
             else
               print_utf8_string(pp, "eq", 0, 2);
           }
@@ -2541,7 +2613,12 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
   else if (SAME_TYPE(SCHEME_TYPE(obj), scheme_struct_type_type))
     {
       if (compact || !pp->print_unreadable) {
-	cannot_print(pp, notdisplay, obj, ht, compact);
+        if (compact && ((Scheme_Struct_Type *)obj)->prefab_key) {
+          print_compact(pp, CPT_PREFAB_TYPE);
+          print(SCHEME_CDR(((Scheme_Struct_Type *)obj)->prefab_key), notdisplay, compact, ht, mt, pp);
+          print_compact_number(pp, ((Scheme_Struct_Type *)obj)->num_slots);
+        } else
+          cannot_print(pp, notdisplay, obj, ht, compact);
       } else {
 	print_utf8_string(pp, "#<", 0, 2);
         if (((Scheme_Struct_Type *)obj)->name) {

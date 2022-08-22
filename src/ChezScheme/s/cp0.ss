@@ -560,7 +560,7 @@
                ; allocation operations that can be separated by a continuation grab.
                [(or can-lift? ; => `build-operands` says it's ok to lift anything past other ivory
                     (if (ivory? body) (andmap simple/profile1? e*) (andmap ivory1? e*)))
-                ; assocate each lhs with cooked operand for corresponding rhs.  make-record-constructor-descriptor,
+                ; associate each lhs with cooked operand for corresponding rhs.  make-record-constructor-descriptor,
                 ; at least, counts on this to allow protocols to be inlined.
                 (for-each (lambda (x e) (prelex-operand-set! x (build-cooked-opnd e))) x* e*)
                 (values (make-lifted #f x* e*) body)]
@@ -589,7 +589,7 @@
                       (let ([x (car x*)] [e (car e*)])
                         (if (and (not (prelex-assigned x)) (ivory? e))
                             (begin
-                              ; assocate each lhs with cooked operand for corresponding rhs.  see note above.
+                              ; associate each lhs with cooked operand for corresponding rhs.  see note above.
                               (prelex-operand-set! x (build-cooked-opnd e))
                               (loop (cdr x*) (cdr e*) rx* re* (cons x rlx*) (cons e rle*)))
                             (loop (cdr x*) (cdr e*) (cons x rx*) (cons e re*) rlx* rle*)))))]
@@ -601,7 +601,7 @@
              (guard (and (or (ivory? body) (andmap ivory1? e*))
                          ;; don't break apart (potential) loops
                          (not (possible-loop? x* body))))
-             ; assocate each lhs with cooked operand for corresponding rhs.  see note above.
+             ; associate each lhs with cooked operand for corresponding rhs.  see note above.
              (for-each (lambda (x e) (prelex-operand-set! x (build-cooked-opnd e))) x* e*)
              (values (make-lifted #f x* e*) body)]
             ; force the issue by creating an extra tmp for body
@@ -617,7 +617,7 @@
              (guard (and (or (ivory? body) (andmap ivory1? e*))
                          ;; don't break apart (potential) loops
                          (not (possible-loop? x* body))))
-             ; assocate each lhs with cooked operand for corresponding rhs.  see note above.
+             ; associate each lhs with cooked operand for corresponding rhs.  see note above.
              (for-each (lambda (x e) (prelex-operand-set! x (build-cooked-opnd e))) x* e*)
              (values (make-lifted #t x* e*) body)]
             ; force the issue by creating an extra tmp for body.
@@ -631,7 +631,7 @@
                  (values (make-lifted #t x* e*) (build-ref x))))]
             ; we can lift arbitrary subforms of record forms if we also lift
             ; a binding for the record form itself.  there's no worry about
-            ; continuation captures: if rtd-expr or e* capture a contination,
+            ; continuation captures: if rtd-expr or e* capture a continuation,
             ; invoking the continuation to return from a rhs is no worse than
             ; invoking the continuation to build the record and then return
             ; from a rhs.
@@ -969,9 +969,15 @@
             (boolean? obj)
             (null? obj)
             (eqv? obj "")
+            (eqv? obj (string->immutable-string ""))
             (eqv? obj '#())
+            (eqv? obj (vector->immutable-vector '#()))
             (eqv? obj '#vu8())
+            (eqv? obj (bytevector->immutable-bytevector '#vu8()))
             (eqv? obj '#vfx())
+            ; no null-immutable-fxvector
+            (eqv? obj '#vfl())
+            ; no null-immutable-flvector
             (eq? obj (void))
             (eof-object? obj)
             (bwp-object? obj)
@@ -1462,6 +1468,10 @@
                                   ;; could send us into a loop for a `letrec`
                                   ;; binding. But use the prelex as a summary
                                   ;; or a way to tie a loop:
+                                  (preinfo->single-valued preinfo x)]
+                                 [(call ,preinfo0 ,pr (case-lambda ,preinfo ,cl* ...) ,e ...)
+                                  (or (eq? (primref-name pr) 'make-wrapper-procedure)
+                                      (eq? (primref-name pr) 'make-arity-wrapper-procedure))
                                   (preinfo->single-valued preinfo x)]
                                  [else #f])))]
                        ;; Recognize call to a loop, and use the loop's prelex in that case:
@@ -2297,7 +2307,7 @@
                     xval]
                    [else #f])))))
 
-      ; could handle inequalies as well (returning #f), but that seems less likely to crop up
+      ; could handle inequalities as well (returning #f), but that seems less likely to crop up
       (define handle-equality
         (lambda (ctxt arg arg*)
           (and
@@ -3614,14 +3624,14 @@
                                                                        (f (ctrcd-ctprcd ctprcd) prtd pprtd vars))]
                                                                     [else
                                                                      (let ([new-vars (map (lambda (x) (cp0-make-temp #f))
-                                                                                       (csv7:record-type-field-indices prtd))])
+                                                                                       ($record-type-field-indices prtd))])
                                                                        (build-lambda new-vars
                                                                          `(call ,(app-preinfo ctxt) ,(go (< level 3) rtd rtd-e ctxt)
                                                                             ,(map build-ref (append new-vars vars))
                                                                             ...)))])))]
                                                            [else
                                                             (let ([new-vars (map (lambda (x) (cp0-make-temp #f))
-                                                                              (csv7:record-type-field-indices prtd))])
+                                                                              ($record-type-field-indices prtd))])
                                                               (build-lambda new-vars
                                                                 `(call ,(app-preinfo ctxt) ,(go (< level 3) rtd rtd-e ctxt)
                                                                    ,(map build-ref (append new-vars vars)) ...)))])

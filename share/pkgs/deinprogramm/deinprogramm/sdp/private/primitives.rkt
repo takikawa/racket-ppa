@@ -83,7 +83,7 @@
  (sdp-set! set!))
 
 (provide sdp-advanced-lambda
-	 sdp-advanced-define)
+         sdp-define)
 
 (provide for-all ==>
 	 check-property
@@ -551,9 +551,6 @@
 
 (define-syntax (sdp-define stx)
   (transform-sdp-define stx #f))
-
-(define-syntax (sdp-advanced-define stx)
-  (transform-sdp-define stx #t))
 
 (define-for-syntax (check-body-definitions bodies)
   (let ((pairs

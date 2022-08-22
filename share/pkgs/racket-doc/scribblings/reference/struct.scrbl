@@ -73,7 +73,7 @@ same structure type, no fields are opaque, and the results of applying
 @racket[equal?]. (Consequently, @racket[equal?]  testing for
 structures may depend on the current inspector.) A structure type can
 override the default @racket[equal?] definition through the
-@racket[gen:equal+hash] @tech{generic interface}.
+@racket[gen:equal+hash] or @racket[gen:equal-mode+hash] @tech{generic interface}.
 
 @local-table-of-contents[]
 
@@ -383,9 +383,8 @@ new structure type. The @racket[guard] must accept two arguments:
 a value for the property supplied to @racket[make-struct-type], and a
 list containing information about the new structure type. The list
 contains the values that @racket[struct-type-info] would return for
-the new structure type if it skipped the immediate current-inspector
-control check (but not the check for exposing an ancestor structure
-type, if any; see @secref["inspectors"]).
+the new structure type if it skipped the current-inspector
+control checks.
 
 The result of calling @racket[guard] is associated with the property
 in the target structure type, instead of the value supplied to
@@ -458,9 +457,16 @@ accessor.
 (p-ref struct:c)
 ]
 
-@history[#:changed "8.4.0.2" @elem{Added the @racket[accessor-name],
+@history[#:changed "7.0" @elem{The @tech{CS} implementation of Racket
+                               skips the inspector check
+                               for exposing an ancestor structure
+                               type, if any, in information provided to a guard procedure.}
+         #:changed "8.4.0.2" @elem{Added the @racket[accessor-name],
                                     @racket[contract-str], and
-                                    @racket[realm] arguments.}]}
+                                    @racket[realm] arguments.}
+         #:changed "8.5.0.2" @elem{Changed the @tech{BC} implementation of Racket
+                                   to skip the inspector check, the same as the @tech{CS} implementation,
+                                   for ancestor information provided to a guard procedure.}]}
 
 
 @defproc[(struct-type-property? [v any/c]) boolean?]{
@@ -670,6 +676,16 @@ supplied @racket[v]s, the @exnraise[exn:fail:contract].
 (make-prefab-struct '(clown 1 (1 #f) #()) "Binky" "pie")
 (make-prefab-struct '(clown 1 (1 #f) #(0)) "Binky" "pie")
 ]}
+
+
+@defproc[(prefab-struct-type-key+field-count [type struct-type?])
+         (or/c #f (cons/c prefab-key? (integer-in 0 32768)))]{
+
+Returns a pair containing the @tech{prefab} key and field count for
+the @tech{structure type descriptor} @racket[type] if it represents a
+prefab structure type, @racket[#f] otherwise.
+
+@history[#:added "8.5.0.8"]}
 
 
 @defproc[(prefab-key->struct-type [key prefab-key?]

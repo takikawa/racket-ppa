@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define collection (quote multi)) (define version "1.0") (define deps (quote (("base" #:version "6.2.900.17")))) (define pkg-authors (quote (chrdimo robby))) (define pkg-desc "Experimental libraries for option contracts")))
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define version "1.0") (define deps (quote (("base" #:version "6.2.900.17")))) (define pkg-authors (quote (chrdimo robby))) (define pkg-desc "Experimental libraries for option contracts") (define license (quote (Apache-2.0 OR MIT)))))

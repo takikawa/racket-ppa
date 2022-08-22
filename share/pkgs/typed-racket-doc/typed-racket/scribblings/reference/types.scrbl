@@ -574,7 +574,7 @@ value of type @racket[t].}
 to @racket[(Syntaxof Symbol)].}
 
 @deftype[Syntax]{A syntax object containing only @rtech{symbol}s,
-@rtech{keyword}s, @rtech{string}s, @rtech{character}s, @rtech{boolean}s,
+@rtech{keyword}s, @rtech{string}s, @rtech{byte string}s, @rtech{character}s, @rtech{boolean}s,
 @rtech{number}s, @rtech{box}es containing @racket[Syntax], @rtech{vector}s of
 @racket[Syntax], or (possibly improper) @rtech{list}s of @racket[Syntax].
 Equivalent to @racket[(Syntaxof Syntax-E)].}
@@ -584,7 +584,7 @@ Applying @racket[syntax-e] to a value of type @racket[Syntax] produces a value
 of type @racket[Syntax-E].}
 
 @deftypeconstr[(Sexpof t)]{Returns the recursive union of @racket[t] with @rtech{symbol}s,
-@rtech{keyword}s, @rtech{string}s, @rtech{character}s, @rtech{boolean}s,
+@rtech{keyword}s, @rtech{string}s, @rtech{byte string}s, @rtech{character}s, @rtech{boolean}s,
 @rtech{number}s, @rtech{box}es, @rtech{vector}s, and (possibly improper)
 @rtech{list}s.}
 
@@ -753,12 +753,13 @@ delimited continuation functions and continuation mark functions.
   @margin-note{Currently, because explicit packing operations for existential types are
   not supported, existential type results are only used to annotate accessors
   for @racket[Struct-Property]}
-  @emph{(Some (a ...) type : #:+ proposition)} for @racket[rng] specifies an
+
+  @racket[(Some (a ...) type : #:+ proposition)] for @racket[rng] specifies an
   @deftech[#:key "Some"]{existential type result}, where the type variables @racket[a ...] may appear
   in @racket[type] and @racket[opt-proposition]. Unpacking the existential type
   result is done automatically while checking application of the function.
 
-  @history[#:changed "1.12" @elem{Added [#:key "Some"]{existential type results}}]
+  @history[#:changed "1.12" @elem{Added @tech[#:key "Some"]{existential type results}}]
 }
 
 @;; This is a trick to get a reference to ->* in another manual

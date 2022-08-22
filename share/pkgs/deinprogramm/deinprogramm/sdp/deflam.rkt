@@ -10,4 +10,4 @@
 
 (provide (rename-out (sdp-advanced-lambda lambda))
 	 (rename-out (sdp-advanced-lambda λ))
-	 (rename-out (sdp-advanced-define define)))
+	 (rename-out (sdp-define define)))

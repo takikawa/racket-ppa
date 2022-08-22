@@ -47,6 +47,7 @@
                         [(#\*) (cons #\s rest)]
                         [(#\=) (cons* #\e #\q #\l rest)]
                         [(#\?) (cons #\p rest)]
+                        [(#\$) (cons* #\s #\y #\s #\_ rest)]
                         [else (cons x rest)]))
           '()
           (string->list (symbol->string x))))))
@@ -64,7 +65,7 @@
       [(name args rhs) (pr "#define ~a~a ~a~%" name args rhs)]))
   (define export
     (lambda (tresult name targs)
-      (pr "EXPORT ~a ~a PROTO(~a);~%" tresult name targs)))
+      (pr "EXPORT ~a ~a~a;~%" tresult name targs)))
   (define &ref
     (lambda (cast x disp)
       (format "(~aTO_VOIDP((uptr)(~a)~:[+~;-~]~d))" cast x (fx< disp 0) (abs disp))))
@@ -198,9 +199,6 @@
            (pr "#include <stdint.h>\n")]
           [else (void)])
 
-        (nl) (comment "Enable function prototypes by default.")
-        (pr "#ifndef PROTO~%#define PROTO(x) x~%#endif~%")
-  
         (nl) (comment "Specify declaration of exports.")
         (pr "#ifdef _WIN32~%")
         (pr "#  if __cplusplus~%")
@@ -282,6 +280,8 @@
         (deftotypep "Sbytevectorp" ($ mask-bytevector) ($ type-bytevector))
         (deftotypep "Sstringp" ($ mask-string) ($ type-string))
         (deftotypep "Sstencil_vectorp" ($ mask-stencil-vector) ($ type-stencil-vector))
+        (deftotypep "Ssystem_stencil_vectorp" ($ mask-sys-stencil-vector) ($ type-sys-stencil-vector))
+        (deftotypep "Sany_stencil_vectorp" ($ mask-any-stencil-vector) ($ type-any-stencil-vector))
         (deftotypep "Sbignump" ($ mask-bignum) ($ type-bignum))
         (deftotypep "Sboxp" ($ mask-box) ($ type-box))
         (deftotypep "Sinexactnump" ($ mask-inexactnum) ($ type-inexactnum))
@@ -429,7 +429,7 @@
           [else
            (comment "Warning: Sforeign_callable_entry_point(x) returns a pointer into x.")
            (def "Sforeign_callable_entry_point(x)"
-                (&ref "(void (*) PROTO((void)))" "x" ($ code-data-disp)))
+                (&ref "(void (*)(void))" "x" ($ code-data-disp)))
            (def "Sforeign_callable_code_object(x)"
                 (&ref "(ptr)" "x" (- ($ code-data-disp))))])
   
@@ -699,7 +699,7 @@
             (pr "                        \"lwz ~ar0, 0(%0)\\n\\t\"\\~%" reg)   ;  try a non-reserved load to see if we are likely to succeed
             (pr "                        \"cmpwi ~ar0, 0\\n\\t\"\\~%" reg)     ;  if it is = 0, try to acquire at start
             (pr "                        \"beq 0b\\n\\t\"\\~%")                ;
-            (pr "                        \"b 1b\\n\\t\"\\~%")                  ;  othwerise loop through the try again
+            (pr "                        \"b 1b\\n\\t\"\\~%")                  ;  otherwise loop through the try again
             (pr "                        \"2:\\n\\t\"\\~%")                    ; done:
             (pr "                        :                \\~%")
             (pr "                        : \"b\" (addr)\\~%")

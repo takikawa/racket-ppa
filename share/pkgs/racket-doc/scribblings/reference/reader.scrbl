@@ -53,6 +53,15 @@ necessarily produce an interned value at the receiving
 @tech{place}. See also @racket[datum-intern-literal] and
 @racket[datum->syntax].
 
+Note that @tech{interned} values are only weakly held by the reader's
+internal table, so they may be @tech[#:key "garbage collection"]{garbage
+collected} if they are no longer otherwise @tech{reachable}. This weakness
+can never affect the result of an @racket[eq?], @racket[eqv?], or
+@racket[equal?] test, but an interned value may disappear when placed into
+a weak box (see @secref["weakbox"]), used as the key in a weak @tech{hash
+table} (see @secref["hashtables"]), or used as an ephemeron key (see
+@secref["ephemerons"]).
+
 @;------------------------------------------------------------------------
 @section[#:tag "default-readtable-dispatch"]{Delimiters and Dispatch}
 
@@ -737,6 +746,10 @@ it must appear between the elements of each pair in the list and
 nowhere in the sequence of list elements. The first element of each
 pair is used as the key for a table entry, and the second element of
 each pair is the associated value.
+
+A @as-index{@litchar{#hashalw}} starts a hash table like
+@litchar{#hash}, except that it constructs a hash table based on
+@racket[equal-always?] instead of @racket[equal?].
 
 A @as-index{@litchar{#hasheq}} starts a hash table like
 @litchar{#hash}, except that it constructs a hash table based on

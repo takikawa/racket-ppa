@@ -1,4 +1,4 @@
-;; Bulgarian translation of Racket string constants file, version: 1.41
+;; Bulgarian translation of Racket string constants file, version: 1.42
 ;; This file is distributed under the same terms as Racket
 ;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022.
 
@@ -1094,7 +1094,8 @@
   (close-tab "Затваряне на подпрозорец") ;; must not have any &s in it.
    ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
   (close-tab-amp "&Затваряне на подпрозорец")
-
+  (reopen-closed-tab "Наново отваряне на затворен подпрозорец")
+  
   ;;; edit menu
   (split-menu-item-label "&Разделяне")
   (collapse-menu-item-label "&Сливане")

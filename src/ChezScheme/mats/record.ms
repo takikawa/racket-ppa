@@ -759,7 +759,7 @@
          (lambda (stx)
            (syntax-case stx ()
              [(k path)
-              #`(#,(datum->syntax #'k 'orig-include) #,(format "~a/../s/~a" *mats-dir* (datum path)))])))
+              #`(#,(datum->syntax #'k 'orig-include) #,(find-source (datum path)))])))
        (include "machine.def")
      ; all this work for two constants:
       (define $fd-unaligned-integers (constant unaligned-integers))
@@ -9118,7 +9118,7 @@
   (and (member o l) #t))
  
 (mat cp0-kar-kons-optimizations
-  ; for now, it's necesary to run cp0 three times to complete the reduction
+  ; for now, it's necessary to run cp0 three times to complete the reduction
   (equal?
     (with-output-to-string
       (lambda ()

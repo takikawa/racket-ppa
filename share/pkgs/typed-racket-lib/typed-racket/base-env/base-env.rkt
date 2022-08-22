@@ -700,6 +700,15 @@
                      (-> a Univ)
                      . -> .
                      (-opt -Index)))]
+[indexes-of (-poly (a b)
+                   (cl->* ((-lst a) Univ . -> . (-lst -Index))
+                          ((-lst a) b (-> a b Univ)
+                             . -> . (-lst -Index))))]
+[indexes-where (-poly (a)
+                      ((-lst a)
+                       (-> a Univ)
+                       . -> .
+                       (-lst -Index)))]
 
 [list? (make-pred-ty (-lst Univ))]
 [list (-poly (a) (->* '() a (-lst a)))]
@@ -709,7 +718,7 @@
                  ((list
                    ((list a) (b b) . ->... . c)
                    (-lst a))
-                  ((-lst b) b) . ->... .(-lst c))))]
+                  ((-lst b) b) . ->... . (-lst c))))]
 [for-each (-polydots (a b) ((list ((list a) (b b) . ->... . Univ) (-lst a))
                             ((-lst b) b) . ->... . -Void))]
 #;[fold-left (-polydots (c a b) ((list ((list c a) (b b) . ->... . c) c (-lst a))
@@ -822,7 +831,7 @@
 
 [append-map
  (-polydots (c a b) ((list ((list a) (b b) . ->... . (-lst c)) (-lst a))
-                     ((-lst b) b) . ->... .(-lst c)))]
+                     ((-lst b) b) . ->... . (-lst c)))]
 [append*
  (-poly (a) ((-lst (-lst a)) . -> . (-lst a)))]
 [flatten
@@ -893,7 +902,9 @@
                       (list -vec-len))]
 [vector (-poly (a) (->* (list) a (-mvec a)))]
 [vector-immutable (-poly (a) (->* (list) a (-ivec a)))]
-[vector->immutable-vector (-poly (a) (-> (-vec a) (-ivec a)))]
+[vector->immutable-vector (-poly (a)
+                                 (cl-> [((-vec a)) (-ivec a)]
+                                       [(-VectorTop) (-ivec Univ)]))]
 [vector-fill! (-poly (a) (-> (-vec a) a -Void))]
 [vector-argmax (-poly (a) (-> (-> a -Real) (-vec a) a))]
 [vector-argmin (-poly (a) (-> (-> a -Real) (-vec a) a))]
@@ -925,9 +936,9 @@
                ((-vec a) -Integer . -> . (-mvec a))
                ((-vec a) -Integer -Integer . -> . (-mvec a))))]
 [vector-map (-polydots (c a b) ((list ((list a) (b b) . ->... . c) (-vec a))
-                                ((-vec b) b) . ->... .(-mvec c)))]
+                                ((-vec b) b) . ->... . (-mvec c)))]
 [vector-map! (-polydots (a b) ((list ((list a) (b b) . ->... . a) (-vec a))
-                               ((-vec b) b) . ->... .(-mvec a)))]
+                               ((-vec b) b) . ->... . (-mvec a)))]
 [vector-append (-poly (a) (->* (list) (-vec a) (-mvec a)))]
 [vector-take   (-poly (a) ((-vec a) -Integer . -> . (-mvec a)))]
 [vector-drop   (-poly (a) ((-vec a) -Integer . -> . (-mvec a)))]
@@ -1002,18 +1013,30 @@
 [hash-clear! (-> -HashTableTop -Void)]
 [hash-clear (-poly (a b) (cl-> [((-HT a b)) (-Immutable-HT a b)]
                                [(-HashTableTop) (-Immutable-HT Univ Univ)]))]
-[hash-copy-clear (-poly (a b) (cl-> [((-Immutable-HT a b)) (-Immutable-HT a b)]
-                                    [((-Mutable-HT a b)) (-Mutable-HT a b)]
-                                    [(-Mutable-HashTableTop) -Mutable-HashTableTop]
-                                    [((-Weak-HT a b)) (-Weak-HT a b)]
-                                    [(-Weak-HashTableTop) -Weak-HashTableTop]
-                                    [((-HT a b)) (-HT a b)]
-                                    [(-HashTableTop) -HashTableTop]))]
+[hash-copy-clear
+ (-poly (a b) (cl->*
+               (->key (-Immutable-HT a b) #:kind (Un (-val #f) (-val 'immutable)) #f
+                      (-Immutable-HT a b))
+               (->key (-Mutable-HT a b) #:kind (Un (-val #f) (-val 'mutable)) #f
+                      (-Mutable-HT a b))
+               (->key -Mutable-HashTableTop #:kind (Un (-val #f) (-val 'mutable)) #t
+                      -Mutable-HashTableTop)
+               (->key (-Weak-HT a b) #:kind (Un (-val #f) (-val 'weak)) #f
+                      (-Weak-HT a b))
+               (->key -Weak-HashTableTop #:kind (Un (-val #f) (-val 'weak)) #f
+                      -Weak-HashTableTop)
+               (->key (-HT a b) #:kind (Un (-val #f) (-val 'immutable) (-val 'mutable) (-val 'ephemeron) (-val 'weak)) #f
+                      (-HT a b))
+               (->key -HashTableTop #:kind (Un (-val #f) (-val 'immutable) (-val 'mutable) (-val 'ephemeron) (-val 'weak)) #f
+                      -HashTableTop)))]
 
 [hash-map (-poly (a b c) (cl-> [((-HT a b) (a b . -> . c)) (-lst c)]
                                [((-HT a b) (a b . -> . c) Univ) (-lst c)]
                                [(-HashTableTop (Univ Univ . -> . c)) (-lst c)]
                                [(-HashTableTop (Univ Univ . -> . c) Univ) (-lst c)]))]
+[hash-map/copy (-poly (a b c d) (->key (-HT a b) (a b . -> . (-values (list c d)))
+                                       #:kind (Un (-val #f) (-val 'immutable) (-val 'mutable) (-val 'ephemeron) (-val 'weak)) #f
+                                       (-HT c d)))]
 [hash-for-each (-poly (a b c) (cl-> [((-HT a b) (-> a b c)) -Void]
                                     [((-HT a b) (-> a b c) Univ) -Void]
                                     [(-HashTableTop (-> Univ Univ c)) -Void]
@@ -1343,10 +1366,9 @@
         (->* (list -String) Univ (Un))
         (->* (list Sym -String) Univ (Un)))]
 
-;raise-type-error (in index)
 [raise-mismatch-error (-> Sym -String Univ (Un))]
-;raise-arity-error
 [raise-syntax-error (->optkey (-opt Sym) -String [Univ Univ (-lst (-Syntax Univ)) -String] #:exn (-> (-lst (-Syntax Univ)) -String -Cont-Mark-Set -Exn) #f (Un))]
+;raise-argument-error, raise-type-error, etc. (in index)
 
 [unquoted-printing-string? (make-pred-ty -Unquoted-Printing-String)]
 [unquoted-printing-string (-> -String -Unquoted-Printing-String)]

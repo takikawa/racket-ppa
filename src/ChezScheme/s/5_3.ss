@@ -34,6 +34,10 @@
       (float-type-case
          [(ieee) -1023]))
 
+   (define-constant float-mantissa-bits
+      (float-type-case
+         [(ieee) 53]))
+
 )
 
 (let ()
@@ -266,8 +270,12 @@
          (let* ([nz ($bignum-trailing-zero-bits n)]
                 [dz ($bignum-trailing-zero-bits d)]
                 [cz (fxmin nz dz)]
-                [n (abs (bitwise-arithmetic-shift-right n nz))]
-                [d (abs (bitwise-arithmetic-shift-right d dz))])
+                ;; The `$bignum-trailing-zero-bits` function is just counting trailing 0 bigits,
+                ;; so it returns an approximation to the number of trailing zero bits. We may need to
+                ;; keep one bigit of `n` or `d` to pair up with leftover trailing 0 bits in
+                ;; `d` or `n`.
+                [n (abs (bitwise-arithmetic-shift-right n (fxmax cz (fx- nz (constant bigit-bits)))))]
+                [d (abs (bitwise-arithmetic-shift-right d (fxmax cz (fx- dz (constant bigit-bits)))))])
            (define (gcd n d)
              (cond
                [(= n 0) d]
@@ -388,7 +396,7 @@
 (define flatanh
    (or (op-if-entry? cflop1 "(cs)atanh")
        ; |x| <= 1
-       ; principle expression:
+       ; principal expression:
        ; (log(1+x)-log(1-x))/2
        ; should use "log1p" but it doesn't exist on the 88k
        (let ([f (lambda (x)
@@ -409,7 +417,7 @@
 (define flasinh
    ; scheme-coded version needs "log2"
    (or (op-if-entry? cflop1 "(cs)asinh")
-       ; prinicple expression:
+       ; principal expression:
        ; log(x + sqrt(xx + 1))
        ; avoids spurious overflows
        ; avoids underflow problems from negative x by using identity
@@ -426,7 +434,7 @@
    ; scheme-coded version needs "log2"
    (or (op-if-entry? cflop1 "(cs)acosh")
        ; x >= 1
-       ; prinicple expression:
+       ; principal expression:
        ; log(x + sqrt(xx - 1))
        ; avoids spurious overflows
        (lambda (x)
@@ -861,6 +869,14 @@
   (lambda (x)
     (<= (- (expt 2 53)) x (expt 2 53))))
 
+(define fixnum-floatable-wlop?
+  ;; floatable without loss of precision
+  (lambda (x)
+    (if (<= (- (fixnum-width) 1) (constant float-mantissa-bits))
+        #t
+        (let ([hi (expt 2 (constant float-mantissa-bits))])
+          (fx<= (- hi) x hi)))))
+
 (define exact-inexact-compare?
    ; e is an exact number, i is a flonum
    ; Preserve transitivity by making i exact,
@@ -1156,7 +1172,9 @@
     (type-case x
       [(fixnum? bignum? ratnum?) #t]
       [(flonum?) (not (exceptional-flonum? x))]
-      [($inexactnum?) (fl= ($inexactnum-imag-part x) 0.0)]
+      [($inexactnum?)
+       (and (fl= ($inexactnum-imag-part x) 0.0)
+            (not (exceptional-flonum? ($inexactnum-real-part x))))]
       [else #f])))
 
 (set! real?
@@ -2247,7 +2265,7 @@
           (type-case y
              [(fixnum?) (fx= x y)]
              [(bignum? ratnum? $exactnum?) #f]
-             [(cflonum?) (cfl= (fixnum->flonum x) y)]
+             [(cflonum?) (if (fixnum-floatable-wlop? x) (cfl= (fixnum->flonum x) y) (exact-inexact-compare? = x y))]
              [else (nonnumber-error who y)])]
          [(bignum?)
           (type-case y
@@ -2272,7 +2290,7 @@
          [(flonum?)
           (type-case y
              [(cflonum?) (cfl= x y)]
-             [(fixnum?) (fl= x (fixnum->flonum y))]
+             [(fixnum?) (if (fixnum-floatable-wlop? y) (fl= x (fixnum->flonum y)) (exact-inexact-compare? = y x))]
              [(bignum? ratnum?) (exact-inexact-compare? = y x)]
              [($exactnum?) #f]
              [else (nonnumber-error who y)])]
@@ -2286,7 +2304,7 @@
              [(fixnum?) (fx< x y)]
              [(bignum?) ($bigpositive? y)]
              [(ratnum?) (< (* ($ratio-denominator y) x) ($ratio-numerator y))]
-             [(flonum?) (< (fixnum->flonum x) y)]
+             [(flonum?) (if (fixnum-floatable-wlop? x) (< (fixnum->flonum x) y) (exact-inexact-compare? < x y))]
              [else (nonreal-error who y)])]
          [(bignum?)
           (type-case y
@@ -2307,7 +2325,7 @@
          [(flonum?)
           (type-case y
              [(flonum?) (fl< x y)]
-             [(fixnum?) (fl< x (fixnum->flonum y))]
+             [(fixnum?) (if (fixnum-floatable-wlop? y) (fl< x (fixnum->flonum y)) (exact-inexact-compare? > y x))]
              [(bignum? ratnum?) (exact-inexact-compare? > y x)]
              [else (nonreal-error who y)])]
          [else (nonreal-error who x)])))
@@ -2321,7 +2339,7 @@
              [(bignum?) ($bigpositive? y)]
              [(ratnum?)
               (<= (* ($ratio-denominator y) x) ($ratio-numerator y))]
-             [(flonum?) (<= (fixnum->flonum x) y)]
+             [(flonum?) (if (fixnum-floatable-wlop? x) (<= (fixnum->flonum x) y) (exact-inexact-compare? <= x y))]
              [else (nonreal-error who y)])]
          [(bignum?)
           (type-case y
@@ -2343,7 +2361,7 @@
          [(flonum?)
           (type-case y
              [(flonum?) (fl<= x y)]
-             [(fixnum?) (fl<= x (fixnum->flonum y))]
+             [(fixnum?) (if (fixnum-floatable-wlop? y) (fl<= x (fixnum->flonum y)) (exact-inexact-compare? >= y x))]
              [(bignum? ratnum?) (exact-inexact-compare? >= y x)]
              [else (nonreal-error who y)])]
          [else (nonreal-error who x)])))

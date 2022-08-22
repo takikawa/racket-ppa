@@ -790,16 +790,9 @@
                    k
                    (add-annotate-property (cdr (vector->list (struct->vector s))))))]
       [(and (hash? s) (immutable? s))
-       (cond
-         [(hash-eq? s)
-          (for/hasheq ([(k v) (in-hash s)])
-            (values k (add-annotate-property v)))]
-         [(hash-eqv? s)
-          (for/hasheqv ([(k v) (in-hash s)])
-            (values k (add-annotate-property v)))]
-         [else
-          (for/hash ([(k v) (in-hash s)])
-            (values k (add-annotate-property v)))])]
+       (hash-map/copy s
+                      (lambda (k v)
+                        (values k (add-annotate-property v))))]
       [else s]))
 
   (define (transform-all-modules stx proc [in-mod-id (namespace-module-identifier)])
