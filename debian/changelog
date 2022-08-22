@@ -1,3 +1,9 @@
+racket (8.6+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- David Bremner <bremner@debian.org>  Mon, 22 Aug 2022 09:21:33 -0700
+
 racket (8.5+dfsg1-1) unstable; urgency=medium
 
   * Bug fix: "should no longer recommend libssl1.1", thanks to Vincent
