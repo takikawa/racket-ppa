@@ -1,10 +1,8 @@
 #lang racket/unit
 
-(require mzlib/thread
-         net/tcp-sig
+(require net/tcp-sig
          racket/async-channel
          racket/match
-         "../safety-limits.rkt"
          (submod "../safety-limits.rkt" private)
          "connection-manager.rkt"
          "dispatch-server-sig.rkt"
@@ -31,37 +29,79 @@
 (define (serve #:confirmation-channel [confirmation-channel #f])
   (define the-server-custodian (make-custodian))
   (parameterize ([current-custodian the-server-custodian]
-                 [current-server-custodian the-server-custodian]
-                 #;[current-thread-initial-stack-size 3])
+                 [current-server-custodian the-server-custodian])
     (define cm (start-connection-manager #:safety-limits config:safety-limits))
-    (thread
-     (lambda ()
-       (run-server
-        ;; This is the port argument, but because we specialize listen, it is ignored.
-        1
-        (handle-connection/cm cm)
-        #f
-        (lambda (exn)
-          ((error-display-handler)
-           (format "Connection error: ~a" (exn-message exn))
-           exn))
-        (lambda (_ mw re)
-          (with-handlers ([exn?
-                           (λ (x)
-                             (async-channel-put* confirmation-channel x)
-                             (raise x))])
-            (define listener
-              (tcp-listen config:port config:max-waiting #t config:listen-ip))
-            (let-values
-                ([(local-addr local-port end-addr end-port)
-                  (tcp-addresses listener #t)])
-              (async-channel-put* confirmation-channel local-port))
-            listener))
-        tcp-close
-        tcp-accept
-        tcp-accept/enable-break))))
-  (lambda ()
-    (custodian-shutdown-all the-server-custodian)))
+    (define handler (handle-connection/cm cm))
+    (define can-break? (break-enabled))
+    (define listener-thd
+      (thread
+       (lambda ()
+         (define listener
+           (with-handlers ([exn? (λ (e)
+                                   (async-channel-put* confirmation-channel e)
+                                   (raise e))])
+             (tcp-listen config:port config:max-waiting #t config:listen-ip)))
+         (define-values (_local-addr local-port _remote-addr _remote-port)
+           (tcp-addresses listener #t))
+         (async-channel-put* confirmation-channel local-port)
+
+         (dynamic-wind
+           void
+           (lambda ()
+             (define paramz (current-parameterization))
+             (define-values (do-sync do-accept)
+               (if can-break?
+                   (values sync/enable-break tcp-accept/enable-break)
+                   (values sync tcp-accept)))
+             ;; The tcp^ signature does not enforce that the result of
+             ;; `tcp-listen' is a synchronizable event, so there could
+             ;; exist implementations where it isn't.  For backwards
+             ;; compatibility, use `always-evt' when the listener is
+             ;; not synchronizable.
+             (define listener-evt (if (evt? listener) listener (handle-evt always-evt (λ (_) listener))))
+             (define max-concurrent (safety-limits-max-concurrent config:safety-limits))
+             (let loop ([in-progress 0])
+               (loop
+                (with-handlers ([exn:fail:network? (λ (e)
+                                                     ((error-display-handler)
+                                                      (format "Connection error: ~a" (exn-message e))
+                                                      e)
+                                                     in-progress)])
+                  (do-sync
+                   (handle-evt
+                    (thread-receive-evt)
+                    (lambda (_)
+                      (let drain-loop ([in-progress in-progress])
+                        (if (thread-try-receive)
+                            (drain-loop (sub1 in-progress))
+                            in-progress))))
+                   (handle-evt
+                    (if (< in-progress max-concurrent) listener-evt never-evt)
+                    (lambda (l)
+                      (define custodian (make-custodian))
+                      (parameterize ([current-custodian custodian])
+                        (parameterize-break #f
+                          (define-values (in out)
+                            (do-accept l))
+                          (define handler-thd
+                            (thread
+                             (lambda ()
+                               (call-with-parameterization
+                                paramz
+                                (lambda ()
+                                  (when can-break? (break-enabled #t))
+                                  (parameterize ([current-custodian (make-custodian custodian)])
+                                    (handler in out)))))))
+                          (thread
+                           (lambda ()
+                             (thread-wait handler-thd)
+                             (thread-send listener-thd 'done)
+                             (custodian-shutdown-all custodian)))
+                          (add1 in-progress))))))))))
+           (lambda ()
+             (tcp-close listener))))))
+    (lambda ()
+      (custodian-shutdown-all the-server-custodian))))
 
 ;; serve-ports : input-port output-port -> void
 ;; returns immediately, spawning a thread to handle
@@ -98,8 +138,12 @@
   (define conn
     (new-connection cm ip op (current-custodian) #f))
 
-  (with-handlers ([exn-expected?
-                   (lambda (_)
+  (with-handlers ([exn:fail?
+                   (lambda (e)
+                     (unless (exn-expected? e)
+                       ((error-display-handler)
+                        (format "Connection error: ~a" (exn-message e))
+                        e))
                      (kill-connection! conn))])
     (let connection-loop ()
       (define-values (req close?)

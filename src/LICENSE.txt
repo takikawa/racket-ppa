@@ -2,49 +2,27 @@ Racket is distributed under the MIT license and the Apache License,
 version 2.0, at your option. However, the Racket runtime system includes
 components distributed under other licenses. In short:
 
-<<<<<<< HEAD:src/LICENSE.txt
-  * The Racket CS runtime system embeds Chez Scheme, which is
-    distributed under the Apache version 2.0 license. This runtime
-    system is built from code in cs and ChezScheme.
-
-  * The Racket BC runtime system includes code distributed under the
-    GNU Lesser General Public License, version 3. This runtime system
-    is built from code in bc.
-=======
 * The Racket CS runtime system embeds Chez Scheme, which is distributed
   under the Apache License, version 2.0. This runtime system is built
-  from code in "racket/src/cs" and "racket/src/ChezScheme".
+  from code in "cs" and "ChezScheme".
 
 * The Racket BC runtime system includes code distributed under the GNU
   Lesser General Public License, either version 3 of the license, or (at
   your option) any later version. This runtime system is built from code
-  in "racket/src/bc".
->>>>>>> v8.6:LICENSE.txt
+  in "bc".
 
 Except for Windows executables that are created with the “embed DLLs”
 option, the runtime system remains separate as a shared library or
 additional executable, which means that it is dynamically linked and can
 be replaced with a modified variant by users.
 
-<<<<<<< HEAD:src/LICENSE.txt
-See the file LICENSE-LGPL.txt for the full text of the GNU
-Lesser General Public License.
+See the file "LICENSE-APACHE.txt" for the full text of the Apache
+License, version 2.0.
 
-See the file LICENSE-APACHE.txt for the full text of the
-Apache version 2.0 license.
+See the file "LICENSE-MIT.txt" for the full text of the MIT license.
 
-See the file LICENSE-MIT.txt for the full text of the
-MIT license.
-=======
-See the file "racket/src/LICENSE-APACHE.txt" for the full text of the
-Apache License, version 2.0.
-
-See the file "racket/src/LICENSE-MIT.txt" for the full text of the MIT
-license.
-
-See the file "racket/src/LICENSE-LGPL.txt" for the full text of the GNU
-Lesser General Public License, version 3.
->>>>>>> v8.6:LICENSE.txt
+See the file "LICENSE-LGPL.txt" for the full text of the GNU Lesser
+General Public License, version 3.
 
 The source code of Racket is available at
 https://github.com/racket/racket and
@@ -55,66 +33,28 @@ have their own licenses.
 
 The following are used in all Racket executables:
 
-<<<<<<< HEAD:src/LICENSE.txt
-* mbed TLS. Code from mbed TLS can be found in
-  rktio/rktio_sha2.c. mbed TLS is licensed under the Apache
-  v2.0 License.
-=======
 * SHA-224 and SHA-256 implementation from Mbed TLS
   Copyright © 2006–2015, ARM Limited, All Rights Reserved
   Mbed TLS is licensed under the Apache License, version 2.0.
-  Code from Mbed TLS can be found in "racket/src/rktio/rktio_sha2.c" and
-  "racket/src/zuo/zuo.c".
->>>>>>> v8.6:LICENSE.txt
+  Code from Mbed TLS can be found in "rktio/rktio_sha2.c" and
+  "zuo/zuo.c".
 
 * ZLib
   Copyright © 1995–2022 Jean-loup Gailly and Mark Adler
   Zlib is distributed under a liberal license: see https://zlib.net.
   Code translated from earlier versions of Zlib can be found in
-  "racket/collects/file/{gzip,gunzip}.rkt". Racket CS executables also
-  use Zlib via Chez Scheme: a copy of Zlib can be found in
-  "racket/src/ChezScheme/zlib". Additionally, on some platforms, Zlib is
-  packaged with the support libraries for racket/draw.
+  "<collects>/file/{gzip,gunzip}.rkt". Racket CS executables also use
+  Zlib via Chez Scheme: a copy of Zlib can be found in
+  "ChezScheme/zlib". Additionally, on some platforms, Zlib is packaged
+  with the support libraries for racket/draw.
 
-<<<<<<< HEAD:src/LICENSE.txt
-* libscheme. Code from libscheme can be found in
-  racket. See the file LICENSE-libscheme.txt
-
-* GNU Lightning. Code from GNU Lightning can be found in
-  bc/src. GNU Lightning is distributed under the GNU
-  Lesser General Public License version 3.
-
-* GMP. Code from GMP can be found in bc/src. The
-  version of GMP used is distributed under the GNU Lesser General
-  Public License version 3.
-
-* zlib. Code translated from earlier versions of zlib can be found in
-  ../collects/file/{gzip,gunzip}.rkt. Zlib is distributed
-  under a liberal license, see http://zlib.net/.
-
-* libffi. Code from libffi can be found in foreign/libffi.
-  See foreign/libffi/LICENSE.
-
-* libunwind. Code from libunwind can be found in
-  unwind.
-
-* random.c. Code from random.c from FreeBSD 2.2 found in
-  random.inc.
-
-* install. Code from install can be found in lt/install-sh
-  and is distributed under the MIT license.
-
-* MemoryModule. Code from MemoryModule can be found in
-  start/MemoryModule.c. MemoryModule is distributed under
-  the MPL v2.0.
-=======
 * Terminal support from Chez Scheme
   Both Racket BC and Racket CS use primitive terminal support code from
   Chez Scheme’s expression editor, which is based on a command-line
   editor for Scheme developed from 1989 through 1994 by C. David Boyer.
-  This code can be found in "racket/src/ChezScheme/c/expeditor.c". The
-  expression editor, like the rest of Chez Scheme, is licensed under the
-  Apache License, version 2.0.
+  This code can be found in "ChezScheme/c/expeditor.c". The expression
+  editor, like the rest of Chez Scheme, is licensed under the Apache
+  License, version 2.0.
 
 The following are used in all Racket executables for Windows:
 
@@ -124,46 +64,45 @@ The following are used in all Racket executables for Windows:
   MemoryModule is licensed under the Mozilla Public License, version
   2.0: see https://www.mozilla.org/en-US/MPL/2.0/ for the full text of
   the license. Code from MemoryModule can be found in
-  "racket/src/start/MemoryModule.{c,h}".
+  "start/MemoryModule.{c,h}".
 
 The following are used only in Racket BC executables:
 
 * libscheme
   Copyright © 1994 Brent Benson
   All rights reserved.
-  See the file "racket/src/LICENSE-libscheme.txt" for the full text of
-  the libscheme license. Code from libscheme can be found in
-  "racket/src/bc/src".
+  See the file "LICENSE-libscheme.txt" for the full text of the
+  libscheme license. Code from libscheme can be found in "bc/src".
 
 * GNU Lightning
   Copyright © 1994, 1995, 1996, 1999, 2000, 2001, 2002, 2011 Free
   Software Foundation, Inc.
   GNU Lightning is distributed under the GNU Lesser General Public
   License, version 3, or (at your option) any later version.
-  A fork of GNU Lightning can be found in "racket/src/bc/src/lightning".
+  A fork of GNU Lightning can be found in "bc/src/lightning".
 
 * GNU MP Library
   Copyright © 1991, 1992, 1993, 1994, 1996, 1999, 2000, 2007 Free
   Software Foundation, Inc.
   GMP is distributed under the GNU Lesser General Public License,
   version 3, or (at your option) any later version.
-  Code from GMP can be found in "racket/src/bc/src/gmp".
+  Code from GMP can be found in "bc/src/gmp".
 
 * libunwind
   Copyright © 2003–2005 Hewlett-Packard Development Company, L.P.
   libunwind is distributed under the MIT license.
-  Code from libunwind can be found in "racket/src/bc/src/unwind".
+  Code from libunwind can be found in "bc/src/unwind".
 
 * libffi
   Copyright © 1996–2019 Anthony Green, Red Hat, Inc and others.
   libffi is distributed under the MIT license.
-  A copy of libffi can be found in "racket/src/bc/foreign/libffi".
+  A copy of libffi can be found in "bc/foreign/libffi".
 
 * random.inc
   Based on "random.c" from FreeBSD 2.2.
   Copyright © 1983, 1993 The Regents of the University of California.
   This code is distributed under a three-clause BSD license.
-  Code from FreeBSD 2.2 can be found in "racket/src/bc/src/random.inc".
+  Code from FreeBSD 2.2 can be found in "bc/src/random.inc".
 
 In addition to the Racket runtime system, the default mode of building
 Racket will install some packages, which are distributed under their own
@@ -224,22 +163,3 @@ The Racket source distribution also includes build scripts generated by
 GNU Autoconf which are under various licenses, including the GNU General
 Public License with Autoconf exception; however, these files are not
 installed with Racket.
-
-Finally, this Git repository also contains (in the "racket-benchmarks"
-package) the following benchmarks based third-party code which are not
-part of the standard Racket distribution:
-
-* psyntax (Portable implementation of syntax-case)
-  By R. Kent Dybvig, Oscar Waddell, Bob Hieb, and Carl Bruggeman
-  psyntax was extracted from Chez Scheme, which is distributed under the
-  Apache License, version 2.0; see also the file header for the original
-  permissive license. Code from psyntax can be found in
-  "pkgs/racket-benchmarks/tests/racket/benchmarks/common/psyntax.sch".
-
-* SCM
-  Copyright (C) 1991, 1993, 1994, 1995 Free Software Foundation, Inc.
-  SCM is distributed under the GNU Lesser General Public License,
-  version 3, or (at your option) any later version.
-  Code from SCM can be found in
-  "pkgs/racket-benchmarks/tests/racket/benchmarks/shootout/pidigits1.rkt".
->>>>>>> v8.6:LICENSE.txt

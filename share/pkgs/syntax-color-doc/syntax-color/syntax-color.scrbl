@@ -47,7 +47,14 @@ Parenthesis matching code built on top of @racket[token-tree%].
   Checks to be sure a lexing function is well-behaved. For more
   details, see @xmethod[color:text<%> start-colorer].
 
+  It also supplies a few random arguments to the lexer and checks the results,
+  using @racket[option/c]'s @racket[#:tester] argument.
+
  @history[#:added "1.2"]}
+
+@defthing[lexer*/c-without-random-testing contract?]{
+ The same contract as @racket[lexer*/c], except without the random testing.
+}
 
 @defstruct*[dont-stop ([val any/c])]{
   A structure type used to indicate to the lexer that it should not

@@ -10,7 +10,8 @@
 	 (for-syntax syntax/boundmap)
 	 (for-syntax syntax/id-table)
 	 (for-syntax syntax/kerncase)
-	 (for-syntax racket/struct-info))
+	 (for-syntax racket/struct-info)
+         (for-syntax stepper/private/syntax-property))
 
 (require (only-in test-engine/syntax test test-display-results!))
 
@@ -139,11 +140,14 @@
            ;; the module-expansion machinery can be used to handle
            ;; requires, etc.:
            #`(#%plain-module-begin
-              (let ((handle (uncaught-exception-handler)))
-                (uncaught-exception-handler
-                 (lambda (exn)
-                   (test-display-results!)
-                   (handle exn))))
+              #,(stepper-syntax-property
+                 #`(let ((handle (uncaught-exception-handler)))
+                     (uncaught-exception-handler
+                      (lambda (exn)
+                        (test-display-results!)
+                        (handle exn))))
+                 'stepper-skip-completely 
+                 #t)
               (module-continue (e1 ...) () ())
               (module configure-runtime racket/base
                 (require deinprogramm/sdp/private/runtime)
