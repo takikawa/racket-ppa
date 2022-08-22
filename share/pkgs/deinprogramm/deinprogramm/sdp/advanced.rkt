@@ -8,6 +8,7 @@
          only-in except-in prefix-in rename-in combine-in relative-in only-meta-in for-syntax for-template for-label for-meta
          let let* letrec lambda λ define
 	 cond if else and or quote
+         begin
          define-record define-record-functions
 	 match
          .. ... .... ..... ......

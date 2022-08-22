@@ -127,7 +127,7 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
             }
           }
         }
-        else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+        else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
         {
           ISPC p_spc = (BACKREFERENCES_ENABLED
                         ? space_impure_typed_object
@@ -726,7 +726,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
           }
         }
       }
-      else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+      else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
       {
         uptr len = Sstencil_vector_length(p);
         {
@@ -1413,7 +1413,7 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
           }
         }
       }
-      else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+      else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
       {
         uptr len = Sstencil_vector_length(p);
         {
@@ -1993,7 +1993,7 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
           }
         }
       }
-      else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+      else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
       {
         uptr len = Sstencil_vector_length(p);
         {
@@ -2872,7 +2872,7 @@ static uptr size_object(ptr p)
         return p_sz;
       }
     }
-    else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+    else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
     {
       uptr len = Sstencil_vector_length(p);
       {
@@ -3194,7 +3194,7 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
           S_G.bytesof[TARGET_GENERATION(si)][countof_vector] += p_sz;
         }
       }
-      else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+      else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
       {
         uptr len = Sstencil_vector_length(p);
         {
@@ -3860,7 +3860,7 @@ static IBOOL object_directly_refers_to_self(ptr p)
           }
         }
       }
-      else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+      else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
       {
         uptr len = Sstencil_vector_length(p);
         {
@@ -4199,7 +4199,7 @@ static void measure(thread_gc *tgc, ptr p)
         }
       }
     }
-    else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+    else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
     {
       uptr len = Sstencil_vector_length(p);
       {

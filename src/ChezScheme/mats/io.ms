@@ -20,7 +20,7 @@
 ; are enabled in io.ss
 (define (custom-port-warning? x) #t)
 
-(define prettytest.ss (format "~a/prettytest.ss" *mats-dir*))
+(define prettytest.ss (find-source "prettytest.ss"))
 
 (mat port-operations
   (error? (close-port cons))
@@ -1049,7 +1049,7 @@
           (newline op)
           (close-port op)))
       ; NB: keep this last among the iconv-codec mats
-      ; close any files left open by failing iconv tests.  this is particulary
+      ; close any files left open by failing iconv tests.  this is particularly
       ; important on windows when the iconv dll isn't available and where keeping
       ; file open can prevent it from being reopened.
       (begin (collect (collect-maximum-generation)) #t)

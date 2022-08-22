@@ -33,6 +33,7 @@
              for/hash for*/hash
              for/hasheq for*/hasheq
              for/hasheqv for*/hasheqv
+             for/hashalw for*/hashalw
 
              for/fold/derived for*/fold/derived
              for/foldr/derived for*/foldr/derived
@@ -1895,9 +1896,9 @@
                                           (if (and (not wrap?) combine*)
                                               (combine* e)
                                               (list (combine e))))))))))]
-        ;; Let `derived-id' complain about the missing bindings and body expression:
+        ;; Let `derived-id-stx' complain about the missing bindings and body expression:
         [(_ . rest)
-         #`(derived-id #,stx fold-bind . rest)])))
+         #`(#,derived-id-stx #,stx fold-bind . rest)])))
   
   (define-syntax define-syntax-via-derived
     (syntax-rules ()
@@ -2132,6 +2133,15 @@
 
   (define-for-variants (for/hasheqv for*/hasheqv)
     ([table #hasheqv()])
+    (lambda (x) x)
+    (lambda (rhs) rhs)
+    (lambda (x)
+      #`(let-values ([(key val) #,x])
+          (hash-set table key val)))
+    #f)
+
+  (define-for-variants (for/hashalw for*/hashalw)
+    ([table (hashalw)])
     (lambda (x) x)
     (lambda (rhs) rhs)
     (lambda (x)

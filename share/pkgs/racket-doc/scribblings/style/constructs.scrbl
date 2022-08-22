@@ -14,10 +14,11 @@ and readability.
 
 Following Lisp and Scheme tradition, we use a single semicolon for in-line
 comments (to the end of a line) and two semicolons for comments that start
-a line. @margin-note*{This request does not contradict the programs in this
+a line. Think of the second semicolon as making an emphatic point.
+
+@;{This request does not contradict the programs in this
 document. They use two semicolons for full-line comments in source but
-scribble renders only one.} Think of the second semicolon as making an
-emphatic point.
+scribble renders only one.}
 
 Seasoned Schemers, not necessarily Racketeers, also use triple and
 quadruple semicolons. This is considered a courtesy to distinguish file
@@ -32,7 +33,9 @@ In addition to @litchar{;}, we have two other mechanisms for commenting code:
  be composed in interesting ways with other comments, for example, @litchar{#;#;}
  will comment two expressions, and a line with just @litchar{;#;} gives you a
  single-character ``toggle'' for the expression that starts on the next
- line.  But on the flip side, many tools don't process them
+ line.
+
+@;{But on the flip side, many tools don't process them
  properly---treating them instead as a @litchar{#} followed by a commented line.
  For example, in DrRacket S-expression comments are ignored when it comes
  to syntax coloring, which makes it easy to miss them. In Emacs, the
@@ -40,7 +43,21 @@ In addition to @litchar{;}, we have two other mechanisms for commenting code:
  it difficult to edit as code.  The bottom line here is that @litchar{#;}
  comments are useful for debugging, but try to avoid leaving them in
  committed code.  If you really want to use @litchar{#;}, clarify their use with
- a line comment (@litchar{;}).
+ a line comment (@litchar{;}).}
+
+
+The screenshots below illustrate the use of @litchar{#;} and how DrRacket and
+Emacs (Racket mode) color such comments by default. 
+
+@nested[#:style 'inset]{
+@tabular[ #:sep @hspace[5]
+@list[
+ @list[
+@image[#:scale .29]{dr-sexp-comment.png}
+@; -----------------------------------------------------------------------------
+@image[#:scale .25]{emacs-sexp-comment.png}
+]]]}
+
 
 @; -----------------------------------------------------------------------------
 @section{Definitions}
@@ -84,7 +101,7 @@ racket
 	 [f (rest f)]
 	 [_ (print (first f))]
 	 [f (rest f)])
-    (code:comment "IN")
+    (code:comment2 "IN")
     f))
 ]
 @; -----------------------------------------------------------------------------
@@ -98,7 +115,7 @@ racket
    (define f (rest f))
    (print (first f))
    (define f (rest f))
-   (code:comment "IN")
+   (code:comment2 "IN")
    f)
 ]
 ]
@@ -281,12 +298,12 @@ With the availability of @racket[for/fold], @racket[for/list],
 @tt{good}
 racket
 
-;; [Sequence X] -> Number
+(code:comment2 #, @elem{[Sequence X] -> Number})
 (define (sum-up s)
   (for/fold ((sum 0)) ((x s))
     (+ sum x)))
 
-;; examples:
+(code:comment2 #, @elem{examples:})
 (sum-up '(1 2 3))
 (sum-up #(1 2 3))
 (sum-up
@@ -301,14 +318,14 @@ racket
 @tt{bad}
 racket
 
-;; [Listof X] -> Number
+(code:comment2 #, @elem{[Listof X] -> Number})
 (define (sum-up alist)
   (foldr (lambda (x sum)
             (+ sum x))
           0
           alist))
 
-;; example:
+(code:comment2 #, @elem{example:})
 (sum-up '(1 2 3))
 ])
 ]
@@ -334,7 +351,7 @@ will do.
 @tt{good}
 racket
 ...
-;; Message -> String
+(code:comment2 #, @elem{Message -> String})
 (define (name msg)
   (first (second msg)))
 ]
@@ -345,7 +362,7 @@ racket
 @tt{bad}
 racket
 ...
-;; Message -> String
+(code:comment2 #, @elem{Message -> String})
 (define-syntax-rule (name msg)
   (first (second msg)))
 ]
@@ -366,19 +383,19 @@ possible.
 @tt{good}
 racket
 ...
-(code:comment #, @t{FN [X -> Y] FN -> Void})
+(code:comment2 #, @t{FN [X -> Y] FN -> Void})
 (define (convert in f out)
   (with-handlers
       ((exn:fail:read? X))
     (with-output-to out
       (writer f))))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((writer f))
  (with-input-from in
    (reader f)))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((reader f))
  ... f ...)
 ]
@@ -387,19 +404,19 @@ racket
 @tt{bad}
 racket
 ...
-(code:comment #, @t{FN [X -> Y] FN -> Void})
+(code:comment2 #, @t{FN [X -> Y] FN -> Void})
 (define (convert in f out)
   (with-handlers
       (((code:hilite (lambda _ #t)) X))
     (with-output-to out
       (writer f))))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((writer f))
  (with-input-from in
    (reader f)))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((reader f))
  ... f ...)
 ]
@@ -418,19 +435,19 @@ It is equally bad to use @racket[exn?] as the exception predicate  even if
 @tt{good}
 racket
 ...
-(code:comment #, @t{FN [X -> Y] FN -> Void})
+(code:comment2 #, @t{FN [X -> Y] FN -> Void})
 (define (convert in f out)
   (with-handlers
       ((exn:fail? X))
     (with-output-to out
       (writer f))))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((writer f))
  (with-input-from in
    (reader f)))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((reader f))
  ... f ...)
 ]
@@ -438,19 +455,19 @@ racket
 @tt{bad}
 racket
 ...
-(code:comment #, @t{FN [X -> Y] FN -> Void})
+(code:comment2 #, @t{FN [X -> Y] FN -> Void})
 (define (convert in f out)
   (with-handlers
       (((code:hilite exn?) X))
     (with-output-to out
       (writer f))))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((writer f))
  (with-input-from in
    (reader f)))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((reader f))
  ... f ...)
 ]
@@ -464,25 +481,25 @@ Finally, a handler for a @racket[exn:fail?] clause should never
 @tt{bad}
 racket
 ...
-(code:comment #, @t{FN [X -> Y] FN -> Void})
+(code:comment2 #, @t{FN [X -> Y] FN -> Void})
 (define (convert in f out)
   (with-handlers ((exn:fail? handler))
     (with-output-to out
       (writer f))))
 
-(code:comment #, @t{Exn -> Void})
+(code:comment2 #, @t{Exn -> Void})
 (define (handler e)
   (cond
     [(exn:fail:read? e)
      (displayln "drracket is special")]
     [else (void)]))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((writer f))
  (with-input-from in
    (reader f)))
 
-(code:comment #, @t{may raise exn:fail:read})
+(code:comment2 #, @t{may raise exn:fail:read})
 (define ((reader f))
  ... f ...)
 ]
@@ -505,7 +522,7 @@ racket
 (define cop
   current-output-port)
 
-(code:comment #, @t{String OPort -> Void})
+(code:comment2 #, @t{String OPort -> Void})
 (define (send msg op)
   (parameterize ((cop op))
     (display msg))
@@ -519,7 +536,7 @@ racket
 (define cop
   current-output-port)
 
-(code:comment #, @t{String OPort -> Void})
+(code:comment2 #, @t{String OPort -> Void})
 (define (send msg op)
   (define cp (cop))
   (cop op)

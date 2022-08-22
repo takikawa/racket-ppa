@@ -4852,6 +4852,8 @@
                               (close-ith-tab i))
                             (define/augment (on-reorder former-indicies)
                               (reorder-tabs former-indicies))
+                            (define/override (on-new-request)
+                              (create-new-tab))
                             (super-new
                              (font small-control-font)
                              (parent panel-with-tabs)

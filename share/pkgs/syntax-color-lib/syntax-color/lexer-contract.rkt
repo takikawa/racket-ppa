@@ -3,6 +3,7 @@
          racket/contract/option)
 (provide lexer/c
          lexer*/c
+         lexer*/c-without-random-testing
          (struct-out dont-stop)
          (contract-out
           [check-colorer-results-match-port-before-and-after
@@ -33,24 +34,31 @@
                       [new-mode any/c])))
    #:tester (λ (lexer) (try-some-random-streams lexer))))
 
+(define lexer*/c-without-option
+  (or/c (->i ([in (and/c input-port? port-counts-lines?)])
+             (values [txt any/c]
+                     [type (or/c symbol? (hash/c symbol? any/c #:immutable #t))]
+                     [paren (or/c symbol? #f)]
+                     [start (or/c exact-positive-integer? #f)]
+                     [end (start type) (end/c start type)]))
+        (->i ([in (and/c input-port? port-counts-lines?)]
+              [offset exact-nonnegative-integer?]
+              [mode (not/c dont-stop?)])
+             (values [txt any/c]
+                     [type (or/c symbol? (hash/c symbol? any/c #:immutable #t))]
+                     [paren (or/c symbol? #f)]
+                     [start (or/c exact-positive-integer? #f)]
+                     [end (start type) (end/c start type)]
+                     [backup exact-nonnegative-integer?]
+                     [new-mode any/c]))))
+
+(define lexer*/c-without-random-testing
+  (option/c
+   lexer*/c-without-option))
+
 (define lexer*/c
   (option/c
-   (or/c (->i ([in (and/c input-port? port-counts-lines?)])
-              (values [txt any/c]
-                      [type (or/c symbol? (hash/c symbol? any/c #:immutable #t))]
-                      [paren (or/c symbol? #f)]
-                      [start (or/c exact-positive-integer? #f)]
-                      [end (start type) (end/c start type)]))
-         (->i ([in (and/c input-port? port-counts-lines?)]
-               [offset exact-nonnegative-integer?]
-               [mode (not/c dont-stop?)])
-              (values [txt any/c]
-                      [type (or/c symbol? (hash/c symbol? any/c #:immutable #t))]
-                      [paren (or/c symbol? #f)]
-                      [start (or/c exact-positive-integer? #f)]
-                      [end (start type) (end/c start type)]
-                      [backup exact-nonnegative-integer?]
-                      [new-mode any/c])))
+   lexer*/c-without-option
    #:tester (λ (lexer) (try-some-random-streams lexer))))
 
 (define (try-some-random-streams lexer)

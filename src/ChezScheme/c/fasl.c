@@ -225,56 +225,56 @@ typedef struct faslFileObj {
 } *faslFile;
 
 /* locally defined functions */
-static INT uf_read PROTO((unbufFaslFile uf, octet *s, iptr n));
-static octet uf_bytein PROTO((unbufFaslFile uf));
-static uptr uf_uptrin PROTO((unbufFaslFile uf, INT *bytes_consumed));
-static ptr fasl_entry PROTO((ptr tc, IFASLCODE situation, unbufFaslFile uf, ptr externals));
-static ptr bv_fasl_entry PROTO((ptr tc, ptr bv, IFASLCODE ty, uptr offset, uptr len, unbufFaslFile uf, ptr externals));
-static void fillFaslFile PROTO((faslFile f));
-static void bytesin PROTO((octet *s, iptr n, faslFile f));
-static void toolarge PROTO((ptr path));
-static iptr iptrin PROTO((faslFile f));
-static uptr uptrin PROTO((faslFile f));
-static float singlein PROTO((faslFile f));
-static double doublein PROTO((faslFile f));
-static iptr stringin PROTO((ptr *pstrbuf, iptr start, faslFile f));
-static void faslin PROTO((ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f));
-static void fasl_record PROTO((ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f, uptr size));
-static IBOOL rtd_equiv PROTO((ptr x, ptr y));
-static IBOOL equalp PROTO((ptr x, ptr y));
+static INT uf_read(unbufFaslFile uf, octet *s, iptr n);
+static octet uf_bytein(unbufFaslFile uf);
+static uptr uf_uptrin(unbufFaslFile uf, INT *bytes_consumed);
+static ptr fasl_entry(ptr tc, IFASLCODE situation, unbufFaslFile uf, ptr externals);
+static ptr bv_fasl_entry(ptr tc, ptr bv, IFASLCODE ty, uptr offset, uptr len, unbufFaslFile uf, ptr externals);
+static void fillFaslFile(faslFile f);
+static void bytesin(octet *s, iptr n, faslFile f);
+static void toolarge(ptr path);
+static iptr iptrin(faslFile f);
+static uptr uptrin(faslFile f);
+static float singlein(faslFile f);
+static double doublein(faslFile f);
+static iptr stringin(ptr *pstrbuf, iptr start, faslFile f);
+static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f);
+static void fasl_record(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f, uptr size);
+static IBOOL rtd_equiv(ptr x, ptr y);
+static IBOOL equalp(ptr x, ptr y);
 #ifdef PORTABLE_BYTECODE
-static void pb_set_abs PROTO((void *address, uptr item));
-static uptr pb_get_abs PROTO((void *address));
+static void pb_set_abs(void *address, uptr item);
+static uptr pb_get_abs(void *address);
 #endif /* AARCH64 */
 #ifdef ARMV6
-static void arm32_set_abs PROTO((void *address, uptr item));
-static uptr arm32_get_abs PROTO((void *address));
-static void arm32_set_jump PROTO((void *address, uptr item, IBOOL callp));
-static uptr arm32_get_jump PROTO((void *address));
+static void arm32_set_abs(void *address, uptr item);
+static uptr arm32_get_abs(void *address);
+static void arm32_set_jump(void *address, uptr item, IBOOL callp);
+static uptr arm32_get_jump(void *address);
 #endif /* ARMV6 */
 #ifdef AARCH64
-static void arm64_set_abs PROTO((void *address, uptr item));
-static uptr arm64_get_abs PROTO((void *address));
+static void arm64_set_abs(void *address, uptr item);
+static uptr arm64_get_abs(void *address);
 #endif /* AARCH64 */
 #ifdef PPC32
-static void ppc32_set_abs PROTO((void *address, uptr item));
-static uptr ppc32_get_abs PROTO((void *address));
-static void ppc32_set_jump PROTO((void *address, uptr item, IBOOL callp));
-static uptr ppc32_get_jump PROTO((void *address));
+static void ppc32_set_abs(void *address, uptr item);
+static uptr ppc32_get_abs(void *address);
+static void ppc32_set_jump(void *address, uptr item, IBOOL callp);
+static uptr ppc32_get_jump(void *address);
 #endif /* PPC32 */
 #ifdef X86_64
-static void x86_64_set_jump PROTO((void *address, uptr item, IBOOL callp));
-static uptr x86_64_get_jump PROTO((void *address));
-static void x86_64_set_popcount PROTO((void *address, uptr item));
+static void x86_64_set_jump(void *address, uptr item, IBOOL callp);
+static uptr x86_64_get_jump(void *address);
+static void x86_64_set_popcount(void *address, uptr item);
 #endif /* X86_64 */
 #ifdef SPARC64
-static INT extract_reg_from_sethi PROTO((void *address));
-static void emit_sethi_lo PROTO((U32 item, INT destreg, void *address));
-static uptr sparc64_get_literal PROTO((void *address));
-static void sparc64_set_call PROTO((void *address, U32 *call_addr, uptr item));
-static U32 adjust_delay_inst PROTO((U32 delay_inst, U32 *old_call_addr, U32 *new_call_addr));
-static INT sparc64_set_lit_only PROTO((void *address, uptr item, I32 destreg));
-static void sparc64_set_literal PROTO((void *address, uptr item));
+static INT extract_reg_from_sethi(void *address);
+static void emit_sethi_lo(U32 item, INT destreg, void *address);
+static uptr sparc64_get_literal(void *address);
+static void sparc64_set_call(void *address, U32 *call_addr, uptr item);
+static U32 adjust_delay_inst(U32 delay_inst, U32 *old_call_addr, U32 *new_call_addr);
+static INT sparc64_set_lit_only(void *address, uptr item, I32 destreg);
+static void sparc64_set_literal(void *address, uptr item);
 #endif /* SPARC64 */
 #ifdef PORTABLE_BYTECODE_SWAPENDIAN
 static void swap_code_endian(octet *code, uptr len);
@@ -282,7 +282,7 @@ static void swap_code_endian(octet *code, uptr len);
 
 static double s_nan;
 
-void S_fasl_init() {
+void S_fasl_init(void) {
     if (S_boot_time) {
         S_protect(&S_G.base_rtd);
         S_G.base_rtd = Sfalse;
@@ -830,10 +830,14 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
             }
             return;
         }
-        case fasl_type_stencil_vector: {
+        case fasl_type_stencil_vector:
+        case fasl_type_system_stencil_vector: {
             uptr mask; iptr n; ptr *p;
             mask = uptrin(f);
-            *x = S_stencil_vector(mask);
+            if (ty == fasl_type_stencil_vector)
+              *x = S_stencil_vector(mask);
+            else
+              *x = S_system_stencil_vector(mask);
             p = &INITSTENVECTIT(*x, 0);
             n = Spopcount(mask);
             while (n--) faslin(tc, p++, t, pstrbuf, f);
@@ -1323,7 +1327,7 @@ int S_fasl_intern_rtd(ptr *x)
 }
 
 /* limited version for checking rtd fields */
-static IBOOL equalp(x, y) ptr x, y; {
+static IBOOL equalp(ptr x, ptr y) {
   if (x == y) return 1;
   if (Spairp(x)) return Spairp(y) && equalp(Scar(x), Scar(y)) && equalp(Scdr(x), Scdr(y));
   if (Svectorp(x)) {
@@ -1336,7 +1340,7 @@ static IBOOL equalp(x, y) ptr x, y; {
   return Sbignump(x) && Sbignump(y) && S_big_eq(x, y);
 }
 
-static IBOOL rtd_equiv(x, y) ptr x, y; {
+static IBOOL rtd_equiv(ptr x, ptr y) {
   return ((RECORDINSTTYPE(x) == RECORDINSTTYPE(y))
           /* recognize `base-rtd` shape: */
           || ((RECORDINSTTYPE(x) == x)
@@ -1378,14 +1382,14 @@ INT pax_encode21(INT n)
 #endif /* HPUX */
 
 /* used here, in S_gc(), and in compile.ss */
-void S_set_code_obj(who, typ, p, n, x, o) char *who; IFASLCODE typ; iptr n, o; ptr p, x; {
+void S_set_code_obj(char *who, IFASLCODE typ, ptr p, iptr n, ptr x, iptr o) {
     void *address; uptr item;
 
     address = TO_VOIDP((uptr)p + n);
     item = (uptr)x + o;
     switch (typ) {
         case reloc_abs:
-            *(uptr *)address = item;
+            STORE_UNALIGNED_UPTR(address, item);
             break;
 #ifdef PORTABLE_BYTECODE
         case reloc_pb_abs:
@@ -1472,13 +1476,13 @@ void S_set_code_obj(who, typ, p, n, x, o) char *who; IFASLCODE typ; iptr n, o; p
 }
 
 /* used in S_gc() */
-ptr S_get_code_obj(typ, p, n, o) IFASLCODE typ; iptr n, o; ptr p; {
+ptr S_get_code_obj(IFASLCODE typ, ptr p, iptr n, iptr o) {
     void *address; uptr item;
 
     address = TO_VOIDP((uptr)p + n);
     switch (typ) {
         case reloc_abs:
-            item = *(uptr *)address;
+            item = LOAD_UNALIGNED_UPTR(address);
             break;
 #ifdef PORTABLE_BYTECODE
         case reloc_pb_abs:
@@ -1556,11 +1560,11 @@ ptr S_get_code_obj(typ, p, n, o) IFASLCODE typ; iptr n, o; ptr p; {
 #ifdef PORTABLE_BYTECODE
 
 static void pb_set_abs(void *address, uptr item) {
-  *(uptr *)address = item;
+  STORE_UNALIGNED_UPTR(address, item);
 }
 
 static uptr pb_get_abs(void *address) {
-  return *(uptr *)address;
+  return LOAD_UNALIGNED_UPTR(address);
 }
 
 #endif /* PORTABLE_BYTECODE */
@@ -1813,7 +1817,7 @@ void x86_64_set_popcount_present(ptr code) {
 #define CALL(disp) (OP_CALL | (disp) >> 2 & 0x3fffffff)
 
 
-static INT extract_reg_from_sethi(address) void *address; {
+static INT extract_reg_from_sethi(void* address) {
   return *(U32 *)address >> 25;
 }
 
@@ -1827,7 +1831,7 @@ static void emit_sethi_lo(U32 item, INT destreg, void *address) {
   *((U32 *)address + 1) = ORI(destreg,low,destreg);
 }
 
-static uptr sparc64_get_literal(address) void *address; {
+static uptr sparc64_get_literal(void *address) {
   uptr item;
 
  /* we may have "call disp" followed by delay instruction */
@@ -1873,7 +1877,7 @@ static U32 adjust_delay_inst(delay_inst, old_call_addr, new_call_addr)
   return 0; /* fortunately, not a valid instruction here */
 }
 
-static void sparc64_set_call(address, call_addr, item) void *address; U32 *call_addr; uptr item; {
+static void sparc64_set_call(void *address, U32 *call_addr, uptr item) {
   U32 delay_inst = *(call_addr + 1), new_delay_inst; iptr disp;
 
  /* later: make item local if it refers to Scheme code, i.e., is in the
@@ -1893,7 +1897,7 @@ static void sparc64_set_call(address, call_addr, item) void *address; U32 *call_
   }
 }
 
-static INT sparc64_set_lit_only(address, item, destreg) void *address; uptr item; I32 destreg; {
+static INT sparc64_set_lit_only(void *address, uptr item, I32 destreg) {
 
   if ((iptr)item >= -0xffffffff && item <= 0xffffffff) {
     uptr x, high, low;
@@ -1926,7 +1930,7 @@ static INT sparc64_set_lit_only(address, item, destreg) void *address; uptr item
   }
 }
 
-static void sparc64_set_literal(address, item) void *address; uptr item; {
+static void sparc64_set_literal(void* address, uptr item) {
   I32 destreg;
 
  /* case 1: we have call followed by delay inst */

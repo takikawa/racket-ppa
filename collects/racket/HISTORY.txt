@@ -1,5 +1,12 @@
+Version 8.6, July 2022
+Change build to use Zuo
+Add `equal-always?`
+Add stencil vectors
+Add support for Arm64 Windows
+Other bug repairs and other changes noted in the documentation
+
 Version 8.5, April 2022
-Add a `-y`/`--make` flag to automatically crete/update ".zo"s
+Add a `-y`/`--make` flag to automatically create/update ".zo"s
 Add error-message realms
 Add `read-syntax-accept-graph`
 Change `make-temporary-file` to have keyword arguments

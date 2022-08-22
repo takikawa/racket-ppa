@@ -1,6 +1,8 @@
 #lang scribble/doc
 @(require "mz.rkt"
-          (for-label syntax/for-body))
+          (for-label syntax/for-body
+                     syntax/parse
+                     syntax/parse/define))
 
 @title[#:tag "for"]{Iterations and Comprehensions: @racket[for], @racket[for/list], ...}
 
@@ -222,20 +224,25 @@ mutate a shared vector.}
 @defform[(for/hash (for-clause ...) body-or-break ... body)]
 @defform[(for/hasheq (for-clause ...) body-or-break ... body)]
 @defform[(for/hasheqv (for-clause ...) body-or-break ... body)]
+@defform[(for/hashalw (for-clause ...) body-or-break ... body)]
 )]{
 
 Like @racket[for/list], but the result is an immutable @tech{hash
 table}; @racket[for/hash] creates a table using @racket[equal?] to
 distinguish keys, @racket[for/hasheq] produces a table using
-@racket[eq?], and @racket[for/hasheqv] produces a table using
-@racket[eqv?]. The last expression in the @racket[body]s must return
+@racket[eq?], @racket[for/hasheqv] produces a table using
+@racket[eqv?], and @racket[for/hashalw] produces a table using
+@racket[equal-always?].
+The last expression in the @racket[body]s must return
 two values: a key and a value to extend the hash table accumulated by
 the iteration.
 
 @examples[
 (for/hash ([i '(1 2 3)])
   (values i (number->string i)))
-]}
+]
+
+@history[#:changed "8.5.0.3" @elem{Added the @racket[for/hashalw] form.}]}
 
 
 @defform[(for/and (for-clause ...) body-or-break ... body)]{ Iterates like
@@ -584,6 +591,7 @@ nested.
 @defform[(for*/hash (for-clause ...) body-or-break ... body)]
 @defform[(for*/hasheq (for-clause ...) body-or-break ... body)]
 @defform[(for*/hasheqv (for-clause ...) body-or-break ... body)]
+@defform[(for*/hashalw (for-clause ...) body-or-break ... body)]
 @defform[(for*/and (for-clause ...) body-or-break ... body)]
 @defform[(for*/or (for-clause ...) body-or-break ... body)]
 @defform[(for*/sum (for-clause ...) body-or-break ... body)]
@@ -606,7 +614,8 @@ Like @racket[for/list], etc., but with the implicit nesting of
   (list i j))
 ]
 
-@history[#:changed "7.3.0.3" @elem{Added the @racket[for*/foldr] form.}]}
+@history[#:changed "7.3.0.3" @elem{Added the @racket[for*/foldr] form.}
+         #:changed "8.5.0.3" @elem{Added the @racket[for*/hashalw] form.}]}
 
 @;------------------------------------------------------------------------
 @section{Deriving New Iteration Forms}
@@ -623,21 +632,16 @@ A macro that expands to @racket[for/fold/derived] should typically use
 definitions mixed with keywords like @racket[#:break].
 
 @mz-examples[#:eval for-eval
-(require (for-syntax syntax/for-body))
-(define-syntax (for/digits stx)
-  (syntax-case stx ()
-    [(_ clauses body ... tail-expr)
-     (with-syntax ([original stx]
-                   [((pre-body ...) (post-body ...))
-                    (split-for-body stx #'(body ... tail-expr))])
-       #'(let-values
-             ([(n k)
-               (for/fold/derived
-                   original ([n 0] [k 1])
-                 clauses
-                 pre-body ...
-                 (values (+ n (* (let () post-body ...) k)) (* k 10)))])
-           n))]))
+(require (for-syntax syntax/for-body)
+         syntax/parse/define)
+
+(define-syntax-parse-rule (for/digits clauses body ... tail-expr)
+  #:with original this-syntax
+  #:with ((pre-body ...) (post-body ...)) (split-for-body this-syntax #'(body ... tail-expr))
+  (for/fold/derived original ([n 0] [k 1] #:result n)
+    clauses
+    pre-body ...
+    (values (+ n (* (let () post-body ...) k)) (* k 10))))
 
 @code:comment{If we misuse for/digits, we can get good error reporting}
 @code:comment{because the use of orig-datum allows for source correlation:}
@@ -654,20 +658,18 @@ definitions mixed with keywords like @racket[#:break].
 
 
 @code:comment{Another example: compute the max during iteration:}
-(define-syntax (for/max stx)
-  (syntax-case stx ()
-    [(_ clauses body ... tail-expr)
-     (with-syntax ([original stx]
-                   [((pre-body ...) (post-body ...))
-                    (split-for-body stx #'(body ... tail-expr))])
-       #'(for/fold/derived original
-           ([current-max -inf.0])
-           clauses
-           pre-body ...
-           (define maybe-new-max (let () post-body ...))
-           (if (> maybe-new-max current-max)
-               maybe-new-max
-               current-max)))]))
+(define-syntax-parse-rule (for/max clauses body ... tail-expr)
+  #:with original this-syntax
+  #:with ((pre-body ...) (post-body ...)) (split-for-body this-syntax #'(body ... tail-expr))
+  (for/fold/derived original
+    ([current-max -inf.0])
+    clauses
+    pre-body ...
+    (define maybe-new-max (let () post-body ...))
+    (if (> maybe-new-max current-max)
+        maybe-new-max
+        current-max)))
+
 (for/max ([n '(3.14159 2.71828 1.61803)]
           [s '(-1      1       1)])
   (* n s))
@@ -681,20 +683,16 @@ definitions mixed with keywords like @racket[#:break].
 Like @racket[for*/fold], but the extra @racket[orig-datum] is used as the source for all syntax errors.
 
 @mz-examples[#:eval for-eval
-(require (for-syntax syntax/for-body))
-(define-syntax (for*/digits stx)
-  (syntax-case stx ()
-    [(_ clauses body ... tail-expr)
-     (with-syntax ([original stx]
-                   [((pre-body ...) (post-body ...))
-                    (split-for-body stx #'(body ... tail-expr))])
-       #'(let-values
-             ([(n k)
-               (for*/fold/derived original ([n 0] [k 1])
-                 clauses
-                 pre-body ...
-                 (values (+ n (* (let () post-body ...) k)) (* k 10)))])
-           n))]))
+(require (for-syntax syntax/for-body)
+         syntax/parse/define)
+
+(define-syntax-parse-rule (for*/digits clauses body ... tail-expr)
+  #:with original this-syntax
+  #:with ((pre-body ...) (post-body ...)) (split-for-body this-syntax #'(body ... tail-expr))
+  (for*/fold/derived original ([n 0] [k 1] #:result n)
+    clauses
+    pre-body ...
+    (values (+ n (* (let () post-body ...) k)) (* k 10))))
 
 (eval:error
  (for*/digits

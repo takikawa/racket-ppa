@@ -68,30 +68,62 @@
                 (lambda (x k v)
                   (hash-set! table k v))))
 
-  (define (hash-copy-clear table)
+  (define (hash-copy-clear table #:kind [kind #f])
     (unless (hash? table)
       (raise-argument-error 'hash-copy-clear "hash?" table))
+    (unless (memq kind '(#f immutable mutable weak ephemeron))
+      (raise-argument-error
+       'hash-copy-clear
+       "(or/c #f 'immutable 'mutable 'weak 'ephemeron)"
+       kind))
     (cond
-     [(immutable? table)
+     [(if kind (eq? 'immutable kind) (immutable? table))
       (cond
        [(hash-equal? table) (hash)]
+       [(hash-equal-always? table) (hashalw)]
        [(hash-eqv? table) (hasheqv)]
        [(hash-eq? table) (hasheq)])]
-     [(hash-weak? table)
+     [(if kind (eq? 'weak kind) (hash-weak? table))
       (cond
        [(hash-equal? table) (make-weak-hash)]
+       [(hash-equal-always? table) (make-weak-hashalw)]
        [(hash-eqv? table) (make-weak-hasheqv)]
        [(hash-eq? table) (make-weak-hasheq)])]
-     [(hash-ephemeron? table)
+     [(if kind (eq? 'ephemeron kind) (hash-ephemeron? table))
       (cond
         [(hash-equal? table) (make-ephemeron-hash)]
+        [(hash-equal-always? table) (make-ephemeron-hashalw)]
         [(hash-eqv? table) (make-ephemeron-hasheqv)]
         [(hash-eq? table) (make-ephemeron-hasheq)])]
      [else
       (cond
        [(hash-equal? table) (make-hash)]
+       [(hash-equal-always? table) (make-hashalw)]
        [(hash-eqv? table) (make-hasheqv)]
        [(hash-eq? table) (make-hasheq)])]))
+
+  (define (hash-map/copy table f #:kind [kind #f])
+    (unless (hash? table)
+      (raise-argument-error 'hash-map/copy "hash?" table))
+    (unless (and (procedure? f) (procedure-arity-includes? f 2))
+      (raise-argument-error 'hash-map/copy "(procedure-arity-includes/c 2)" f))
+    (unless (memq kind '(#f immutable mutable weak ephemeron))
+      (raise-argument-error
+       'hash-map/copy
+       "(or/c #f 'immutable 'mutable 'weak 'ephemeron)"
+       kind))
+    (define acc (hash-copy-clear table #:kind kind))
+    (cond
+     [(immutable? acc)
+      (for/fold ([acc acc])
+                ([(k1 v1) (in-hash table)])
+        (define-values [k2 v2] (f k1 v1))
+        (hash-set acc k2 v2))]
+     [else
+      (for ([(k1 v1) (in-hash table)])
+        (define-values [k2 v2] (f k1 v1))
+        (hash-set! acc k2 v2))
+      acc]))
 
   (define (hash-empty? table)
     (unless (hash? table)
@@ -105,4 +137,5 @@
            hash-set*
            hash-set*!
            hash-empty?
-           hash-copy-clear))
+           hash-copy-clear
+           hash-map/copy))

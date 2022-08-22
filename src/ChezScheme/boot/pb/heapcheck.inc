@@ -90,7 +90,7 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
         }
       }
     }
-    else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+    else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
     {
       uptr len = Sstencil_vector_length(p);
       {
@@ -547,7 +547,7 @@ static uptr size_object(ptr p)
         return p_sz;
       }
     }
-    else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+    else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
     {
       uptr len = Sstencil_vector_length(p);
       {
