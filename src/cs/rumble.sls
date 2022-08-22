@@ -178,6 +178,8 @@
 
           equal?
           equal?/recur
+          equal-always?
+          equal-always?/recur
 
           impersonator?
           chaperone?
@@ -263,6 +265,7 @@
           struct->vector
           prefab-key?
           prefab-struct-key
+          prefab-struct-type-key+field-count
           prefab-key->struct-type
           make-prefab-struct
           prop:authentic
@@ -283,12 +286,14 @@
           eqv-hash-code
           equal-hash-code
           equal-secondary-hash-code
+          equal-always-hash-code
+          equal-always-secondary-hash-code
 
-          hash hasheqv hasheq
-          make-hash make-hasheqv make-hasheq
-          make-immutable-hash make-immutable-hasheqv make-immutable-hasheq
-          make-weak-hash make-weak-hasheq make-weak-hasheqv
-          make-ephemeron-hash make-ephemeron-hasheq make-ephemeron-hasheqv
+          hash hasheqv hasheq hashalw
+          make-hash make-hasheqv make-hasheq make-hashalw
+          make-immutable-hash make-immutable-hasheqv make-immutable-hasheq make-immutable-hashalw
+          make-weak-hash make-weak-hasheq make-weak-hasheqv make-weak-hashalw
+          make-ephemeron-hash make-ephemeron-hasheq make-ephemeron-hasheqv make-ephemeron-hashalw
           hash-ref hash-ref-key hash-set hash-set! hash-remove hash-remove!
           hash-for-each hash-map hash-copy hash-clear hash-clear!
           hash-iterate-first hash-iterate-next
@@ -308,7 +313,7 @@
           unsafe-ephemeron-hash-iterate-key+value unsafe-ephemeron-hash-iterate-pair
           unsafe-hash-seal!    ; not exported to racket
 
-          hash? hash-eq? hash-equal? hash-eqv? hash-strong? hash-weak? hash-ephemeron?
+          hash? hash-eq? hash-equal? hash-eqv? hash-equal-always? hash-strong? hash-weak? hash-ephemeron?
           hash-count
           hash-keys-subset?
           eq-hashtable->hash   ; not exported to racket
@@ -492,6 +497,7 @@
           make-hash-placeholder
           make-hasheq-placeholder
           make-hasheqv-placeholder
+          make-hashalw-placeholder
 
           time-apply
           current-inexact-milliseconds
@@ -566,6 +572,9 @@
           unsafe-fx-/wraparound
           unsafe-fx*/wraparound
           unsafe-fxlshift/wraparound
+          unsafe-fxpopcount
+          unsafe-fxpopcount32
+          unsafe-fxpopcount16
 
           unsafe-fx=
           unsafe-fx<
@@ -721,6 +730,13 @@
           unsafe-string-length
           unsafe-string-ref
           unsafe-string-set!
+
+          unsafe-stencil-vector
+          unsafe-stencil-vector-length
+          unsafe-stencil-vector-mask
+          unsafe-stencil-vector-ref
+          unsafe-stencil-vector-set!
+          unsafe-stencil-vector-update
 
           (rename [inline:unsafe-struct-ref unsafe-struct-ref]
                   [inline:unsafe-struct-set! unsafe-struct-set!])

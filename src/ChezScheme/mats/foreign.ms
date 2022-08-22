@@ -181,7 +181,14 @@
                         (x v ...))
                       (+ v ...)))))))))
 
-(define foreign1.so (format "~a/foreign1.so" *mats-dir*))
+(define foreign1.so (let ([p (find-source "foreign1.so")])
+                      p
+                      (if (or (path-absolute? p)
+                              (not (equal? "" (path-parent p))))
+                          p
+                          ;; specify relative to current directory:
+                          (path-build "." p))))
+(printf "found ~s in ~s\n" foreign1.so (source-directories))
 
 (machine-case
   [(i3ob ti3ob a6ob ta6ob a6s2 ta6s2 i3s2 ti3s2 i3qnx ti3qnx)
@@ -1826,7 +1833,7 @@
   (let ([bv1 (string->utf8 "hello")] [bv2 (make-bytevector 5)])
     ($fp-bvcopy bv2 bv1 5)
     (and (bytevector=? bv1 bv2) (bytevector=? bv1 (string->utf8 "hello"))))
-  ;; No longer an error since make-ftype-pointer also serves to make foriegn-pointers
+  ;; No longer an error since make-ftype-pointer also serves to make foreign-pointers
   #;(error? ; "memcpy" is not a procedure
       (make-ftype-pointer memcpy_t "memcpy"))
   (error? ; unrecognized ftype
@@ -2511,7 +2518,7 @@
         (+ $stack-depth $base-value)))
   (or (= (optimize-level) 3)
       ; similarly, but with a ptr return value so the values error is signaled
-      ; by S_call_help wrather than the foreign-procedure wrapper
+      ; by S_call_help rather than the foreign-procedure wrapper
       (eqv?
         ($with-exit-proc
           (lambda (ignore)
@@ -2551,7 +2558,7 @@
         (let ()
           (define *m*)
           (define *k*)
-          (define ip (open-file-input-port (format "~a/mat.ss" *mats-dir*)))
+          (define ip (open-file-input-port (find-source "mat.ss")))
           (define-ftype foo (function (fixnum fixnum) fixnum))
           (define f
             (lambda (n m)

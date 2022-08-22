@@ -25,7 +25,7 @@
 # endif
 #endif
 
-#if SGC_STD_DEBUGGING
+#if SGC_STD_DEBUGGING && !defined(MZ_PRECISE_GC)
 # ifndef USE_SENORA_GC
 #  define USE_SENORA_GC
 # endif
@@ -426,6 +426,12 @@ typedef struct Scheme_Long_Double_Vector {
 } Scheme_Long_Double_Vector;
 #endif
 
+typedef struct Scheme_Stencil_Vector {
+  Scheme_Object so;
+  intptr_t mask;
+  Scheme_Object *els[mzFLEX_ARRAY_DECL];
+} Scheme_Stencil_Vector;
+
 typedef struct Scheme_Print_Params Scheme_Print_Params;
 typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Print_Params *pp);
 
@@ -542,6 +548,8 @@ typedef intptr_t (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_d
 #define SCHEME_FLVECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_flvector_type)
 #define SCHEME_EXTFLVECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_extflvector_type)
 #define SCHEME_FXVECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_fxvector_type)
+
+#define SCHEME_STENCIL_VECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_stencil_vector_type)
 
 #define SCHEME_STRUCTP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_structure_type) || SAME_TYPE(SCHEME_TYPE(obj), scheme_proc_struct_type))
 #define SCHEME_STRUCT_TYPEP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_struct_type_type)
@@ -960,7 +968,8 @@ enum {
 enum {
   SCHEME_hashtr_eq,
   SCHEME_hashtr_equal,
-  SCHEME_hashtr_eqv
+  SCHEME_hashtr_eqv,
+  SCHEME_hashtr_equal_always
 };
 
 typedef struct Scheme_Env Scheme_Env;

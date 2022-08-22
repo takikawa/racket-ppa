@@ -28,6 +28,8 @@ See @secref["reader"] for information on the default reader in
 @racket[read-syntax] mode and @secref["parse-reader"] for
 the protocol of @racket[read-syntax].}
 
+@guidealso["stx-obj"]
+
 @defproc[(read/recursive [in input-port? (current-input-port)]
                          [start (or/c char? #f) #f]
                          [readtable (or/c readtable? #f) (current-readtable)]
@@ -394,7 +396,7 @@ arguments:
 The default port read handler reads standard Racket expressions with
 Racket's built-in parser (see @secref["reader"]). It handles a
 special result from a custom input port (see
-@racket[make-custom-input-port]) by treating it as a single expression,
+@racket[make-input-port]) by treating it as a single expression,
 except that special-comment values (see
 @secref["special-comments"]) are treated as whitespace.
 

@@ -24,9 +24,10 @@
 take advantage of machines with multiple processors, cores, or
 hardware threads.
 
-@margin-note{Currently, parallel support for places is enabled
-  only for the @tech{CS} and @tech{3m} implementations of Racket, and for @tech{3m}, only
-  by default for Windows, Linux x86/x86_64, and Mac OS x86/x86_64/AArch64. To
+@margin-note{Currently, parallel support for places is enabled 
+  on all platforms that support Racket @tech{CS}, the default implementation of Racket.
+  The @tech{3m} implementation also supports parallel execution of places
+  by default on Windows, Linux x86/x86_64, and Mac OS x86/x86_64. To
   enable support for other platforms with @tech{3m}, use @DFlag{enable-places} with
   @exec{configure} when building Racket. The @racket[place-enabled?]
   function reports whether places run in parallel.
@@ -368,8 +369,8 @@ messages:
 
  @item{@tech{file-stream ports} and @tech{TCP ports}, where the
        underlying representation (such as a file descriptor, socket,
-       or handle) is duplicated and attached to a fresh port in the
-       receiving place;}
+       or handle) is duplicated in the sending place and attached to
+       a fresh port in the receiving place;}
 
  @item{@tech[#:doc '(lib "scribblings/foreign/foreign.scrbl")]{C
        pointers} as created or accessed via @racketmodname[ffi/unsafe]; and}

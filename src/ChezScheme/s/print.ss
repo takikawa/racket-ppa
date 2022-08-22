@@ -49,7 +49,7 @@
                ; we use write instead of wr here so that the field doesn't get
                ; a reference (#n#) when print-graph is true.
                 (write (or (record-reader rtd) (record-type-uid rtd)) p)
-                (do ([flds (csv7:record-type-field-indices rtd) (cdr flds)]
+                (do ([flds ($record-type-field-indices rtd) (cdr flds)]
                      [i 0 (+ i 1)])
                     ((null? flds))
                   (write-char #\space p)
@@ -101,7 +101,7 @@
           ($object-in-heap? x)
           (or (pair? x)
               (vector? x)
-              (stencil-vector? x)
+              ($stencil-vector? x)
               (box? x)
               (and ($record? x) (not (eq? x #!base-rtd)))
               (fxvector? x)
@@ -162,13 +162,13 @@
                         (unless (or (fx> i m) (limit? veclen))
                           (find-dupls (vector-ref x i) lev len)
                           (f (fx+ i 1) (decr veclen))))))]
-                 [(stencil-vector? x)
-                  (unless (fx= (stencil-vector-length x) 0)
-                    (let ([m (fx- (stencil-vector-length x) 1)]
+                 [($stencil-vector? x)
+                  (unless (fx= ($stencil-vector-length x) 0)
+                    (let ([m (fx- ($stencil-vector-length x) 1)]
                           [lev (decr lev)])
                       (let f ([i 0] [veclen len])
                         (unless (or (fx> i m) (limit? veclen))
-                          (find-dupls (stencil-vector-ref x i) lev len)
+                          (find-dupls ($stencil-vector-ref x i) lev len)
                           (f (fx+ i 1) (decr veclen))))))]
                  [(and ($record? x) (not (eq? x #!base-rtd)))
                   (when (print-record)
@@ -209,7 +209,7 @@
                (cond
                  [(pair? x) (cyclic-structure? x curlev lstlen cyclic-pair?)]
                  [(vector? x) (cyclic-structure? x curlev 0 cyclic-vector?)]
-                 [(stencil-vector? x) (cyclic-structure? x curlev 0 cyclic-stencil-vector?)]
+                 [($stencil-vector? x) (cyclic-structure? x curlev 0 cyclic-stencil-vector?)]
                  [(and ($record? x) (not (eq? x #!base-rtd)))
                   (and (print-record)
                        (cyclic-structure? x curlev lstlen
@@ -255,10 +255,10 @@
 
    (define cyclic-stencil-vector?
       (lambda (x curlev lstlen)
-         (let ([n (stencil-vector-length x)] [curlev (fx+ curlev 1)])
+         (let ([n ($stencil-vector-length x)] [curlev (fx+ curlev 1)])
             (let across ([i (fx- (if len (fxmin len n) n) 1)])
                (and (fx>= i 0)
-                    (or (cyclic? (stencil-vector-ref x i) curlev 0)
+                    (or (cyclic? ($stencil-vector-ref x i) curlev 0)
                         (across (fx- i 1))))))))
 
    (define cyclic-box?
@@ -301,11 +301,11 @@
                      (and (fx>= i 0)
                           (or (down (vector-ref x i) (fx- xlev 1))
                               (across (fx- i 1))))))]
-                [(stencil-vector? x)
-                 (let ([n (stencil-vector-length x)])
+                [($stencil-vector? x)
+                 (let ([n ($stencil-vector-length x)])
                    (let across ([i (fx- (if len (fxmin len n) n) 1)])
                      (and (fx>= i 0)
-                          (or (down (stencil-vector-ref x i) (fx- xlev 1))
+                          (or (down ($stencil-vector-ref x i) (fx- xlev 1))
                               (across (fx- i 1))))))]
                 [(and ($record? x) (not (eq? x #!base-rtd)))
                  (and (print-record)
@@ -325,7 +325,7 @@
     (and (if (fixmediate? x)
              (eq? x black-hole)
              (and ($object-in-heap? x)
-                  (or (pair? x) (vector? x) (stencil-vector? x) (box? x) (and ($record? x) (not (eq? x #!base-rtd))))))
+                  (or (pair? x) (vector? x) ($stencil-vector? x) (box? x) (and ($record? x) (not (eq? x #!base-rtd))))))
          (or (print-graph)
              (and (not (and lev len))
                   (maybe-cyclic? x lev len)
@@ -357,7 +357,7 @@
     digits to be in
 <mode> is one of:
     'normal:  this is used for "free format" printing.  In normal
-        mode, the digits produced are the minumum number needed
+        mode, the digits produced are the minimum number needed
         to reproduce the internal representation.  In this case,
         <position> is ignored (pass in zero).
 
@@ -380,8 +380,8 @@ In any of the modes, you receive an infinite list consisting of
     * the sign represented by 1 for + and -1 for -
     * the exponent
     * the significant digits w/o trailing zeros
-    * a (posibly empty) sequence of -1's, and
-    * a (posibly empty) sequence of -2's.
+    * a (possibly empty) sequence of -1's, and
+    * a (possibly empty) sequence of -2's.
 
 The -1's should be printed as zeros if you need them; a -1 digit is
 equivalent to zero except that it is not necessary to print it to
@@ -682,9 +682,9 @@ floating point returns with (1 0 -1 ...).
           [(pair?) (wrpair x r lev len d? env p)]
           [(string?) (if d? (display-string x p) (wrstring x p))]
           [(vector?) (wrvector vector-length vector-ref #f x r lev len d? env p)]
-          [(stencil-vector?) (wrvector stencil-vector-length stencil-vector-ref
-                                       (string-append "stencil[" (number->string (stencil-vector-mask x) 16) "]")
-                                       x r lev len d? env p)]
+          [($stencil-vector?) (wrvector $stencil-vector-length $stencil-vector-ref
+                                        (string-append "stencil[" (number->string ($stencil-vector-mask x) 16) "]")
+                                        x r lev len d? env p)]
           [(fxvector?) (wrvector fxvector-length fxvector-ref "vfx" x r lev len d? env p)]
           [(flvector?) (wrvector flvector-length flvector-ref "vfl" x r lev len d? env p)]
           [(bytevector?) (wrvector bytevector-length bytevector-u8-ref "vu8" x r lev len d? env p)]

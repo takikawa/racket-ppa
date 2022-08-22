@@ -160,8 +160,6 @@
                 (1/would-be-future would-be-future)
                 (1/wrap-evt wrap-evt)))
 (define hash2610 (hasheq))
-(define hash2589 (hasheqv))
-(define hash2725 (hash))
 (define select-handler/no-breaks
   (lambda (e_0 bpz_0 l_0)
     (with-continuation-mark*
@@ -894,6 +892,142 @@
            (void)
            (raise-argument-error 'hash-keys "hash?" 0 h_0 try-order?_0))
          (hash-keys_0 h_0 try-order?_0)))))))
+(define hash-copy-clear.1
+  (|#%name|
+   hash-copy-clear
+   (lambda (kind1_0 table3_0)
+     (begin
+       (begin
+         (if (hash? table3_0)
+           (void)
+           (raise-argument-error 'hash-copy-clear "hash?" table3_0))
+         (if (memq kind1_0 '(#f immutable mutable weak ephemeron))
+           (void)
+           (raise-argument-error
+            'hash-copy-clear
+            "(or/c #f 'immutable 'mutable 'weak 'ephemeron)"
+            kind1_0))
+         (if (if kind1_0 (eq? 'immutable kind1_0) (immutable? table3_0))
+           (if (hash-equal? table3_0)
+             (hash)
+             (if (hash-equal-always? table3_0)
+               (hashalw)
+               (if (hash-eqv? table3_0)
+                 (hasheqv)
+                 (if (hash-eq? table3_0) (hasheq) (void)))))
+           (if (if kind1_0 (eq? 'weak kind1_0) (hash-weak? table3_0))
+             (if (hash-equal? table3_0)
+               (make-weak-hash)
+               (if (hash-equal-always? table3_0)
+                 (make-weak-hashalw)
+                 (if (hash-eqv? table3_0)
+                   (make-weak-hasheqv)
+                   (if (hash-eq? table3_0) (make-weak-hasheq) (void)))))
+             (if (if kind1_0
+                   (eq? 'ephemeron kind1_0)
+                   (hash-ephemeron? table3_0))
+               (if (hash-equal? table3_0)
+                 (make-ephemeron-hash)
+                 (if (hash-equal-always? table3_0)
+                   (make-ephemeron-hashalw)
+                   (if (hash-eqv? table3_0)
+                     (make-ephemeron-hasheqv)
+                     (if (hash-eq? table3_0) (make-ephemeron-hasheq) (void)))))
+               (if (hash-equal? table3_0)
+                 (make-hash)
+                 (if (hash-equal-always? table3_0)
+                   (make-hashalw)
+                   (if (hash-eqv? table3_0)
+                     (make-hasheqv)
+                     (if (hash-eq? table3_0) (make-hasheq) (void)))))))))))))
+(define hash-map/copy.1
+  (|#%name|
+   hash-map/copy
+   (lambda (kind5_0 table7_0 f8_0)
+     (begin
+       (begin
+         (if (hash? table7_0)
+           (void)
+           (raise-argument-error 'hash-map/copy "hash?" table7_0))
+         (begin
+           (if (if (procedure? f8_0) (procedure-arity-includes? f8_0 2) #f)
+             (void)
+             (raise-argument-error
+              'hash-map/copy
+              "(procedure-arity-includes/c 2)"
+              f8_0))
+           (begin
+             (if (memq kind5_0 '(#f immutable mutable weak ephemeron))
+               (void)
+               (raise-argument-error
+                'hash-map/copy
+                "(or/c #f 'immutable 'mutable 'weak 'ephemeron)"
+                kind5_0))
+             (let ((acc_0 (hash-copy-clear.1 kind5_0 table7_0)))
+               (if (immutable? acc_0)
+                 (begin
+                   (letrec*
+                    ((for-loop_0
+                      (|#%name|
+                       for-loop
+                       (lambda (acc_1 i_0)
+                         (begin
+                           (if i_0
+                             (call-with-values
+                              (lambda () (hash-iterate-key+value table7_0 i_0))
+                              (case-lambda
+                               ((k1_0 v1_0)
+                                (let ((acc_2
+                                       (let ((acc_2
+                                              (call-with-values
+                                               (lambda ()
+                                                 (|#%app| f8_0 k1_0 v1_0))
+                                               (case-lambda
+                                                ((k2_0 v2_0)
+                                                 (hash-set acc_1 k2_0 v2_0))
+                                                (args
+                                                 (raise-binding-result-arity-error
+                                                  2
+                                                  args))))))
+                                         (values acc_2))))
+                                  (for-loop_0
+                                   acc_2
+                                   (hash-iterate-next table7_0 i_0))))
+                               (args
+                                (raise-binding-result-arity-error 2 args))))
+                             acc_1))))))
+                    (for-loop_0 acc_0 (hash-iterate-first table7_0))))
+                 (begin
+                   (begin
+                     (letrec*
+                      ((for-loop_0
+                        (|#%name|
+                         for-loop
+                         (lambda (i_0)
+                           (begin
+                             (if i_0
+                               (call-with-values
+                                (lambda ()
+                                  (hash-iterate-key+value table7_0 i_0))
+                                (case-lambda
+                                 ((k1_0 v1_0)
+                                  (begin
+                                    (call-with-values
+                                     (lambda () (|#%app| f8_0 k1_0 v1_0))
+                                     (case-lambda
+                                      ((k2_0 v2_0) (hash-set! acc_0 k2_0 v2_0))
+                                      (args
+                                       (raise-binding-result-arity-error
+                                        2
+                                        args))))
+                                    (for-loop_0
+                                     (hash-iterate-next table7_0 i_0))))
+                                 (args
+                                  (raise-binding-result-arity-error 2 args))))
+                               (values)))))))
+                      (for-loop_0 (hash-iterate-first table7_0))))
+                   (void)
+                   acc_0))))))))))
 (define hash-empty?
   (lambda (table_0)
     (begin
@@ -1712,7 +1846,7 @@
       (max
        0.0
        (/
-        (let ((app_0 (if timeout-at_0 timeout-at_0 (|#%app| distant-future))))
+        (let ((app_0 (if timeout-at_0 timeout-at_0 (distant-future))))
           (- app_0 (current-inexact-monotonic-milliseconds)))
         1000.0))))
    (lambda (wakeup_0)
@@ -2612,7 +2746,7 @@
 (define waiter-suspend!
   (lambda (w_0 interrupt-cb_0)
     (|#%app| (waiter-methods-suspend (waiter-ref w_0)) w_0 interrupt-cb_0)))
-(define finish_2595
+(define finish_2537
   (make-struct-type-install-properties
    '(select-waiter)
    1
@@ -2624,8 +2758,7 @@
      (let ((temp10_0
             (lambda args_0
               (internal-error "should not suspend a select-waiter"))))
-       (let ((temp11_0
-              (lambda (w_0 s_0) (|#%app| (|#%app| select-waiter-proc w_0)))))
+       (let ((temp11_0 (lambda (w_0 s_0) (|#%app| (select-waiter-proc w_0)))))
          (make-waiter-methods.1 temp11_0 temp10_0)))))
    (current-inspector)
    #f
@@ -2641,7 +2774,7 @@
    #f
    1
    0))
-(define effect_2826 (finish_2595 struct:select-waiter))
+(define effect_2826 (finish_2537 struct:select-waiter))
 (define select-waiter7.1
   (|#%name|
    select-waiter
@@ -3473,173 +3606,19 @@
                                                      (maybe-ph_0
                                                       ph_0
                                                       v_1
-                                                      (if (hash-eq? v_1)
-                                                        (begin
-                                                          (letrec*
-                                                           ((for-loop_0
-                                                             (|#%name|
-                                                              for-loop
-                                                              (lambda (table_0
-                                                                       i_0)
-                                                                (begin
-                                                                  (if i_0
-                                                                    (call-with-values
-                                                                     (lambda ()
-                                                                       (hash-iterate-key+value
-                                                                        v_1
-                                                                        i_0))
-                                                                     (case-lambda
-                                                                      ((k_0
-                                                                        v_2)
-                                                                       (let ((table_1
-                                                                              (let ((table_1
-                                                                                     (call-with-values
-                                                                                      (lambda ()
-                                                                                        (let ((app_0
-                                                                                               (loop_0
-                                                                                                k_0)))
-                                                                                          (values
-                                                                                           app_0
-                                                                                           (loop_0
-                                                                                            v_2))))
-                                                                                      (case-lambda
-                                                                                       ((key_0
-                                                                                         val_0)
-                                                                                        (hash-set
-                                                                                         table_0
-                                                                                         key_0
-                                                                                         val_0))
-                                                                                       (args
-                                                                                        (raise-binding-result-arity-error
-                                                                                         2
-                                                                                         args))))))
-                                                                                (values
-                                                                                 table_1))))
-                                                                         (for-loop_0
-                                                                          table_1
-                                                                          (hash-iterate-next
-                                                                           v_1
-                                                                           i_0))))
-                                                                      (args
-                                                                       (raise-binding-result-arity-error
-                                                                        2
-                                                                        args))))
-                                                                    table_0))))))
-                                                           (for-loop_0
-                                                            hash2610
-                                                            (hash-iterate-first
-                                                             v_1))))
-                                                        (if (hash-eqv? v_1)
-                                                          (begin
-                                                            (letrec*
-                                                             ((for-loop_0
-                                                               (|#%name|
-                                                                for-loop
-                                                                (lambda (table_0
-                                                                         i_0)
-                                                                  (begin
-                                                                    (if i_0
-                                                                      (call-with-values
-                                                                       (lambda ()
-                                                                         (hash-iterate-key+value
-                                                                          v_1
-                                                                          i_0))
-                                                                       (case-lambda
-                                                                        ((k_0
-                                                                          v_2)
-                                                                         (let ((table_1
-                                                                                (let ((table_1
-                                                                                       (call-with-values
-                                                                                        (lambda ()
-                                                                                          (let ((app_0
-                                                                                                 (loop_0
-                                                                                                  k_0)))
-                                                                                            (values
-                                                                                             app_0
-                                                                                             (loop_0
-                                                                                              v_2))))
-                                                                                        (case-lambda
-                                                                                         ((key_0
-                                                                                           val_0)
-                                                                                          (hash-set
-                                                                                           table_0
-                                                                                           key_0
-                                                                                           val_0))
-                                                                                         (args
-                                                                                          (raise-binding-result-arity-error
-                                                                                           2
-                                                                                           args))))))
-                                                                                  (values
-                                                                                   table_1))))
-                                                                           (for-loop_0
-                                                                            table_1
-                                                                            (hash-iterate-next
-                                                                             v_1
-                                                                             i_0))))
-                                                                        (args
-                                                                         (raise-binding-result-arity-error
-                                                                          2
-                                                                          args))))
-                                                                      table_0))))))
-                                                             (for-loop_0
-                                                              hash2589
-                                                              (hash-iterate-first
-                                                               v_1))))
-                                                          (begin
-                                                            (letrec*
-                                                             ((for-loop_0
-                                                               (|#%name|
-                                                                for-loop
-                                                                (lambda (table_0
-                                                                         i_0)
-                                                                  (begin
-                                                                    (if i_0
-                                                                      (call-with-values
-                                                                       (lambda ()
-                                                                         (hash-iterate-key+value
-                                                                          v_1
-                                                                          i_0))
-                                                                       (case-lambda
-                                                                        ((k_0
-                                                                          v_2)
-                                                                         (let ((table_1
-                                                                                (let ((table_1
-                                                                                       (call-with-values
-                                                                                        (lambda ()
-                                                                                          (let ((app_0
-                                                                                                 (loop_0
-                                                                                                  k_0)))
-                                                                                            (values
-                                                                                             app_0
-                                                                                             (loop_0
-                                                                                              v_2))))
-                                                                                        (case-lambda
-                                                                                         ((key_0
-                                                                                           val_0)
-                                                                                          (hash-set
-                                                                                           table_0
-                                                                                           key_0
-                                                                                           val_0))
-                                                                                         (args
-                                                                                          (raise-binding-result-arity-error
-                                                                                           2
-                                                                                           args))))))
-                                                                                  (values
-                                                                                   table_1))))
-                                                                           (for-loop_0
-                                                                            table_1
-                                                                            (hash-iterate-next
-                                                                             v_1
-                                                                             i_0))))
-                                                                        (args
-                                                                         (raise-binding-result-arity-error
-                                                                          2
-                                                                          args))))
-                                                                      table_0))))))
-                                                             (for-loop_0
-                                                              hash2725
-                                                              (hash-iterate-first
-                                                               v_1)))))))))
+                                                      (let ((temp12_0
+                                                             (lambda (k_0 v_2)
+                                                               (let ((app_0
+                                                                      (loop_0
+                                                                       k_0)))
+                                                                 (values
+                                                                  app_0
+                                                                  (loop_0
+                                                                   v_2))))))
+                                                        (hash-map/copy.1
+                                                         'immutable
+                                                         v_1
+                                                         temp12_0)))))
                                                  (if (cpointer? v_1)
                                                    (ptr-add v_1 0)
                                                    (if (if (let ((or-part_0
@@ -3808,154 +3787,11 @@
                               (args
                                (raise-binding-result-arity-error 4 args))))))
                           (if (hash? v_1)
-                            (if (hash-eq? v_1)
-                              (begin
-                                (letrec*
-                                 ((for-loop_0
-                                   (|#%name|
-                                    for-loop
-                                    (lambda (table_0 i_0)
-                                      (begin
-                                        (if i_0
-                                          (call-with-values
-                                           (lambda ()
-                                             (hash-iterate-key+value v_1 i_0))
-                                           (case-lambda
-                                            ((k_0 v_2)
-                                             (let ((table_1
-                                                    (let ((table_1
-                                                           (call-with-values
-                                                            (lambda ()
-                                                              (let ((app_0
-                                                                     (loop_0
-                                                                      k_0)))
-                                                                (values
-                                                                 app_0
-                                                                 (loop_0
-                                                                  v_2))))
-                                                            (case-lambda
-                                                             ((key_0 val_0)
-                                                              (hash-set
-                                                               table_0
-                                                               key_0
-                                                               val_0))
-                                                             (args
-                                                              (raise-binding-result-arity-error
-                                                               2
-                                                               args))))))
-                                                      (values table_1))))
-                                               (for-loop_0
-                                                table_1
-                                                (hash-iterate-next v_1 i_0))))
-                                            (args
-                                             (raise-binding-result-arity-error
-                                              2
-                                              args))))
-                                          table_0))))))
-                                 (for-loop_0
-                                  hash2610
-                                  (hash-iterate-first v_1))))
-                              (if (hash-eqv? v_1)
-                                (begin
-                                  (letrec*
-                                   ((for-loop_0
-                                     (|#%name|
-                                      for-loop
-                                      (lambda (table_0 i_0)
-                                        (begin
-                                          (if i_0
-                                            (call-with-values
-                                             (lambda ()
-                                               (hash-iterate-key+value
-                                                v_1
-                                                i_0))
-                                             (case-lambda
-                                              ((k_0 v_2)
-                                               (let ((table_1
-                                                      (let ((table_1
-                                                             (call-with-values
-                                                              (lambda ()
-                                                                (let ((app_0
-                                                                       (loop_0
-                                                                        k_0)))
-                                                                  (values
-                                                                   app_0
-                                                                   (loop_0
-                                                                    v_2))))
-                                                              (case-lambda
-                                                               ((key_0 val_0)
-                                                                (hash-set
-                                                                 table_0
-                                                                 key_0
-                                                                 val_0))
-                                                               (args
-                                                                (raise-binding-result-arity-error
-                                                                 2
-                                                                 args))))))
-                                                        (values table_1))))
-                                                 (for-loop_0
-                                                  table_1
-                                                  (hash-iterate-next
-                                                   v_1
-                                                   i_0))))
-                                              (args
-                                               (raise-binding-result-arity-error
-                                                2
-                                                args))))
-                                            table_0))))))
-                                   (for-loop_0
-                                    hash2589
-                                    (hash-iterate-first v_1))))
-                                (begin
-                                  (letrec*
-                                   ((for-loop_0
-                                     (|#%name|
-                                      for-loop
-                                      (lambda (table_0 i_0)
-                                        (begin
-                                          (if i_0
-                                            (call-with-values
-                                             (lambda ()
-                                               (hash-iterate-key+value
-                                                v_1
-                                                i_0))
-                                             (case-lambda
-                                              ((k_0 v_2)
-                                               (let ((table_1
-                                                      (let ((table_1
-                                                             (call-with-values
-                                                              (lambda ()
-                                                                (let ((app_0
-                                                                       (loop_0
-                                                                        k_0)))
-                                                                  (values
-                                                                   app_0
-                                                                   (loop_0
-                                                                    v_2))))
-                                                              (case-lambda
-                                                               ((key_0 val_0)
-                                                                (hash-set
-                                                                 table_0
-                                                                 key_0
-                                                                 val_0))
-                                                               (args
-                                                                (raise-binding-result-arity-error
-                                                                 2
-                                                                 args))))))
-                                                        (values table_1))))
-                                                 (for-loop_0
-                                                  table_1
-                                                  (hash-iterate-next
-                                                   v_1
-                                                   i_0))))
-                                              (args
-                                               (raise-binding-result-arity-error
-                                                2
-                                                args))))
-                                            table_0))))))
-                                   (for-loop_0
-                                    hash2725
-                                    (hash-iterate-first v_1))))))
+                            (let ((temp15_0
+                                   (lambda (k_0 v_2)
+                                     (let ((app_0 (loop_0 k_0)))
+                                       (values app_0 (loop_0 v_2))))))
+                              (hash-map/copy.1 'immutable v_1 temp15_0))
                             (if (if (cpointer? v_1)
                                   (if v_1 (not (bytes? v_1)) #f)
                                   #f)
@@ -5079,7 +4915,7 @@
   (make-parameter
    (let ((root-plumber_0 (1/current-plumber)))
      (lambda (v_0)
-       (begin (1/plumber-flush-all root-plumber_0) (|#%app| force-exit v_0))))
+       (begin (1/plumber-flush-all root-plumber_0) (force-exit v_0))))
    (lambda (p_0)
      (begin
        (if (if (procedure? p_0) (procedure-arity-includes? p_0 1) #f)
@@ -5102,14 +4938,13 @@
     (|#%name|
      exit
      (case-lambda (() (begin (exit_0 #t))) ((v1_0) (exit_0 v1_0))))))
-(define finish_2167
+(define finish_2536
   (make-struct-type-install-properties
    '(custodian-box)
    2
    0
    #f
    (list
-    (cons prop:authentic #t)
     (cons
      1/prop:evt
      (lambda (cb_0)
@@ -5128,20 +4963,66 @@
    #f
    2
    1))
-(define effect_2694 (finish_2167 struct:custodian-box))
+(define effect_2694 (finish_2536 struct:custodian-box))
 (define custodian-box1.1
   (|#%name|
    custodian-box
    (record-constructor
     (make-record-constructor-descriptor struct:custodian-box #f #f))))
-(define 1/custodian-box?
+(define 1/custodian-box?_2920
   (|#%name| custodian-box? (record-predicate struct:custodian-box)))
-(define custodian-box-v
+(define 1/custodian-box?
+  (|#%name|
+   custodian-box?
+   (lambda (v)
+     (if (1/custodian-box?_2920 v)
+       #t
+       ($value
+        (if (impersonator? v)
+          (1/custodian-box?_2920 (impersonator-val v))
+          #f))))))
+(define custodian-box-v_2465
   (|#%name| custodian-box-v (record-accessor struct:custodian-box 0)))
-(define custodian-box-sema
+(define custodian-box-v
+  (|#%name|
+   custodian-box-v
+   (lambda (s)
+     (if (1/custodian-box?_2920 s)
+       (custodian-box-v_2465 s)
+       ($value
+        (impersonate-ref custodian-box-v_2465 struct:custodian-box 0 s 'v))))))
+(define custodian-box-sema_2703
   (|#%name| custodian-box-sema (record-accessor struct:custodian-box 1)))
-(define set-custodian-box-v!
+(define custodian-box-sema
+  (|#%name|
+   custodian-box-sema
+   (lambda (s)
+     (if (1/custodian-box?_2920 s)
+       (custodian-box-sema_2703 s)
+       ($value
+        (impersonate-ref
+         custodian-box-sema_2703
+         struct:custodian-box
+         1
+         s
+         'sema))))))
+(define set-custodian-box-v!_2574
   (|#%name| set-custodian-box-v! (record-mutator struct:custodian-box 0)))
+(define set-custodian-box-v!
+  (|#%name|
+   set-custodian-box-v!
+   (lambda (s v)
+     (if (1/custodian-box?_2920 s)
+       (set-custodian-box-v!_2574 s v)
+       ($value
+        (impersonate-set!
+         set-custodian-box-v!_2574
+         struct:custodian-box
+         0
+         0
+         s
+         v
+         'v))))))
 (define finish_2585
   (make-struct-type-install-properties
    '(willed-callback)
@@ -5316,9 +5197,10 @@
                   (let ((c_0 (create-custodian parent_0)))
                     (begin
                       (set-custodian-place! c_0 (custodian-place parent_0))
-                      (let ((children_0 (custodian-children c_0)))
-                        (let ((cref_0
-                               (let ((temp43_0
+                      (let ((cref_0
+                             (let ((temp43_0
+                                    (let ((children_0
+                                           (custodian-children c_0)))
                                       (|#%name|
                                        temp43
                                        (lambda (c_1)
@@ -5326,32 +5208,32 @@
                                            (begin
                                              (reference-sink children_0)
                                              (do-custodian-shutdown-all
-                                              c_1)))))))
-                                 (do-custodian-register.1
-                                  #f
-                                  #f
-                                  #t
-                                  #f
-                                  #t
-                                  parent_0
-                                  c_0
-                                  temp43_0))))
-                          (begin
-                            (set-custodian-parent-reference! c_0 cref_0)
-                            (if cref_0
-                              (void)
-                              (begin-unsafe
-                               (raise-arguments-error
-                                'make-custodian
-                                "the custodian has been shut down"
-                                "custodian"
-                                parent_0)))
-                            (|#%app|
-                             host:will-register
-                             (unsafe-place-local-ref cell.1$7)
-                             c_0
-                             merge-custodian-into-parent)
-                            c_0))))))))))))
+                                              c_1))))))))
+                               (do-custodian-register.1
+                                #f
+                                #f
+                                #t
+                                #f
+                                #t
+                                parent_0
+                                c_0
+                                temp43_0))))
+                        (begin
+                          (set-custodian-parent-reference! c_0 cref_0)
+                          (if cref_0
+                            (void)
+                            (begin-unsafe
+                             (raise-arguments-error
+                              'make-custodian
+                              "the custodian has been shut down"
+                              "custodian"
+                              parent_0)))
+                          (|#%app|
+                           host:will-register
+                           (unsafe-place-local-ref cell.1$7)
+                           c_0
+                           merge-custodian-into-parent)
+                          c_0)))))))))))
     (|#%name|
      make-custodian
      (case-lambda
@@ -5694,7 +5576,9 @@
       (set! place-wakeup-initial wakeup-initial_0)
       (set! place-wakeup wakeup_0))))
 (define custodian-this-place?
-  (lambda (c_0) (eq? (custodian-place c_0) (unsafe-place-local-ref cell.1$2))))
+  (lambda (c_0)
+    (let ((app_0 (custodian-place c_0)))
+      (eq? app_0 (unsafe-place-local-ref cell.1$2)))))
 (define do-custodian-shutdown-all
   (let ((do-custodian-shutdown-all_0
          (|#%name|
@@ -6597,7 +6481,7 @@
                   (void)))
               (void)))))))
      (loop_0 mref_0))))
-(define finish_2220
+(define finish_2610
   (make-struct-type-install-properties
    '(thread)
    24
@@ -6611,17 +6495,17 @@
                  1/prop:evt
                  (lambda (t_0)
                    (wrap-evt7.1
-                    (|#%app| get-thread-dead-evt t_0)
+                    (get-thread-dead-evt t_0)
                     (lambda (v_0) t_0))))))
            (let ((app_4
                   (cons
                    prop:waiter
                    (let ((temp28_0
                           (lambda (t_0 i-cb_0)
-                            (|#%app| thread-deschedule! t_0 #f i-cb_0))))
+                            (thread-deschedule! t_0 #f i-cb_0))))
                      (let ((temp29_0
                             (lambda (t_0 v_0)
-                              (begin (|#%app| thread-reschedule! t_0) v_0))))
+                              (begin (thread-reschedule! t_0) v_0))))
                        (make-waiter-methods.1 temp29_0 temp28_0))))))
              (list
               app_0
@@ -6644,7 +6528,7 @@
    #f
    24
    16777082))
-(define effect_2668 (finish_2220 struct:thread))
+(define effect_2668 (finish_2610 struct:thread))
 (define thread1.1
   (|#%name|
    thread
@@ -6923,7 +6807,7 @@
         (void)
         (begin
           (thread-group-remove! (thread-parent t_0) t_0)
-          (|#%app| thread-unscheduled-for-work-tracking! t_0)))
+          (thread-unscheduled-for-work-tracking! t_0)))
       (remove-from-sleeping-threads! t_0)
       (run-kill-callbacks! t_0)
       (set-thread-suspend+resume-callbacks! t_0 null)
@@ -6986,7 +6870,7 @@
                    (void))
                  (engine-block))
                (void))
-             (begin-unsafe (|#%app| 1/check-for-break)))))))))
+             (begin-unsafe (1/check-for-break)))))))))
 (define do-kill-thread
   (lambda (t_0) (if (1/thread-dead? t_0) (void) (thread-dead! t_0))))
 (define remove-thread-custodian
@@ -7084,8 +6968,8 @@
            (for-loop_0 lst_0))))
       (void)
       (set-thread-kill-callbacks! t_0 null))))
-(define check-for-break-after-kill (lambda () (|#%app| 1/check-for-break)))
-(define effect_2294
+(define check-for-break-after-kill (lambda () (1/check-for-break)))
+(define effect_2749
   (begin
     (void
      (let ((proc_0
@@ -7099,7 +6983,7 @@
                             (null? (thread-custodian-references t_0))))
                       (engine-block)
                       (void))
-                    (begin-unsafe (|#%app| 1/check-for-break)))
+                    (begin-unsafe (1/check-for-break)))
                   (void))))))
        (begin-unsafe (set! post-shutdown-action proc_0))))
     (void)))
@@ -7112,7 +6996,7 @@
          (if (1/thread? t_0)
            (void)
            (raise-argument-error 'thread-wait "thread?" t_0))
-         (1/semaphore-wait (|#%app| get-thread-dead-sema t_0)))))))
+         (1/semaphore-wait (get-thread-dead-sema t_0)))))))
 (define finish_3191
   (make-struct-type-install-properties
    '(thread-dead-evt)
@@ -7227,7 +7111,7 @@
         (begin
           (set-thread-descheduled?! t_0 #t)
           (thread-group-remove! (thread-parent t_0) t_0)
-          (|#%app| thread-unscheduled-for-work-tracking! t_0)
+          (thread-unscheduled-for-work-tracking! t_0)
           (if timeout-at_0
             (add-to-sleeping-threads!
              t_0
@@ -7237,9 +7121,7 @@
                #f
                timeout-at_0)))
             (void))
-          (if (eq? t_0 (current-thread/in-atomic))
-            (|#%app| thread-did-work!)
-            (void))))
+          (if (eq? t_0 (current-thread/in-atomic)) (thread-did-work!) (void))))
       (lambda ()
         (if (eq? t_0 (1/current-thread))
           (begin
@@ -7808,7 +7690,7 @@
                 (if or-part_0
                   or-part_0
                   (schedule-info-did-work? sched-info_0)))
-            (|#%app| thread-did-work!)
+            (thread-did-work!)
             (thread-poll-done! (current-thread/in-atomic)))
           (set-thread-sched-info! (current-thread/in-atomic) sched-info_0))
         (end-atomic))
@@ -7899,11 +7781,9 @@
                               (>= app_0 (current-atomic)))
                           (if (1/break-enabled)
                             (not
-                             (let ((app_0 thread-ignore-break-cell?))
-                               (|#%app|
-                                app_0
-                                t_0
-                                (current-break-enabled-cell))))
+                             (thread-ignore-break-cell?
+                              t_0
+                              (current-break-enabled-cell)))
                             #f)
                           #f)
                         #f)
@@ -7960,8 +7840,10 @@
                    'break-thread
                    "(or/c #f 'hang-up 'terminate)"
                    kind21_0))
-                (let ((app_0 (if kind21_0 kind21_0 'break)))
-                  (do-break-thread t22_0 app_0 (1/current-thread)))))))))
+                (do-break-thread
+                 t22_0
+                 (if kind21_0 kind21_0 'break)
+                 (1/current-thread))))))))
     (|#%name|
      break-thread
      (case-lambda
@@ -8175,7 +8057,7 @@
                 (begin-unsafe (queue-add-front! (thread-mailbox t_0) msg_0)))
               lst_0))
            (end-atomic)))))))
-(define finish_2013
+(define finish_2918
   (make-struct-type-install-properties
    '(thread-receive-evt)
    0
@@ -8191,42 +8073,42 @@
             (values (list self_0) #f)
             (if (poll-ctx-poll? poll-ctx_0)
               (values #f self_0)
-              (let ((select-proc_0 (poll-ctx-select-proc poll-ctx_0)))
-                (let ((receive_0
+              (let ((receive_0
+                     (let ((select-proc_0 (poll-ctx-select-proc poll-ctx_0)))
                        (|#%name|
                         receive
                         (lambda ()
                           (begin
                             (if (is-mail? t_0)
                               (|#%app| select-proc_0)
-                              (void)))))))
-                  (let ((add-wakeup-callback!_0
-                         (|#%name|
-                          add-wakeup-callback!
-                          (lambda ()
-                            (begin
-                              (let ((wakeup_0 (thread-mailbox-wakeup t_0)))
-                                (set-thread-mailbox-wakeup!
-                                 t_0
-                                 (lambda ()
-                                   (begin
-                                     (|#%app| wakeup_0)
-                                     (|#%app| receive_0))))))))))
-                    (begin
-                      (add-wakeup-callback!_0)
-                      (values
-                       #f
-                       (control-state-evt9.1
-                        the-async-evt
-                        (lambda (v_0) self_0)
-                        (lambda () (set-thread-mailbox-wakeup! t_0 void))
-                        (lambda () (set! receive_0 void))
+                              (void))))))))
+                (let ((add-wakeup-callback!_0
+                       (|#%name|
+                        add-wakeup-callback!
                         (lambda ()
                           (begin
-                            (add-wakeup-callback!_0)
-                            (if (is-mail? t_0)
-                              (values self_0 #t)
-                              (values #f #f)))))))))))))))))
+                            (let ((wakeup_0 (thread-mailbox-wakeup t_0)))
+                              (set-thread-mailbox-wakeup!
+                               t_0
+                               (lambda ()
+                                 (begin
+                                   (|#%app| wakeup_0)
+                                   (|#%app| receive_0))))))))))
+                  (begin
+                    (add-wakeup-callback!_0)
+                    (values
+                     #f
+                     (control-state-evt9.1
+                      the-async-evt
+                      (lambda (v_0) self_0)
+                      (lambda () (set-thread-mailbox-wakeup! t_0 void))
+                      (lambda () (set! receive_0 void))
+                      (lambda ()
+                        (begin
+                          (add-wakeup-callback!_0)
+                          (if (is-mail? t_0)
+                            (values self_0 #t)
+                            (values #f #f))))))))))))))))
    (current-inspector)
    #f
    '()
@@ -8241,7 +8123,7 @@
    #f
    0
    0))
-(define effect_2506 (finish_2013 struct:thread-receiver-evt))
+(define effect_2506 (finish_2918 struct:thread-receiver-evt))
 (define thread-receiver-evt26.1
   (|#%name|
    thread-receiver-evt
@@ -9488,10 +9370,7 @@
                 (if enable-break?7_0 (make-thread-cell #t) #f)))
            (let ((s_0
                   (let ((temp41_0
-                         (let ((app_0 random-rotate))
-                           (|#%app|
-                            app_0
-                            (|#%app| evts->syncers who9_0 args11_0)))))
+                         (random-rotate (evts->syncers who9_0 args11_0))))
                     (let ((temp42_0
                            (if local-break-cell_0
                              (let ((t_0 (1/current-thread)))
@@ -9524,11 +9403,12 @@
                               (begin
                                 (start-atomic)
                                 (thread-push-kill-callback!
-                                 (lambda () (|#%app| syncing-abandon! s_0)))
+                                 (lambda () (syncing-abandon! s_0)))
                                 (thread-push-suspend+resume-callbacks!
-                                 (lambda () (|#%app| syncing-interrupt! s_0))
+                                 (lambda () (syncing-interrupt! s_0))
                                  (lambda ()
-                                   (|#%app| syncing-queue-retry! s_0)))
+                                   (begin-unsafe
+                                    (set-syncing-need-retry?! s_0 #t))))
                                 (end-atomic)))
                             (lambda ()
                               (begin
@@ -9570,17 +9450,15 @@
                                                          (if thunk-result?38_0
                                                            (lambda () #f)
                                                            #f))))))
-                                              (let ((temp44_1 temp44_0))
-                                                (|#%app|
-                                                 sync-poll.1
-                                                 #f
-                                                 #t
-                                                 temp45_0
-                                                 #f
-                                                 #t
-                                                 unsafe-undefined
-                                                 temp44_1
-                                                 s_0)))))))))
+                                              (sync-poll.1
+                                               #f
+                                               #t
+                                               temp45_0
+                                               #f
+                                               #t
+                                               unsafe-undefined
+                                               temp44_0
+                                               s_0))))))))
                                    (poll-loop_0))
                                   (let ((timeout-at_0
                                          (if timeout10_0
@@ -9609,17 +9487,14 @@
                                                     (end-atomic)
                                                     (loop_0 #f #f))
                                                   (begin
-                                                    (|#%app|
-                                                     syncing-done!
+                                                    (syncing-done!
                                                      s_0
                                                      none-syncer)
                                                     (end-atomic)
                                                     (if thunk-result?38_0
                                                       (lambda () #f)
                                                       #f))))
-                                              (if (if (|#%app|
-                                                       all-asynchronous?
-                                                       s_0)
+                                              (if (if (all-asynchronous? s_0)
                                                     (if (not
                                                          (syncing-selected
                                                           s_0))
@@ -9629,8 +9504,7 @@
                                                       #f)
                                                     #f)
                                                 (begin
-                                                  (|#%app|
-                                                   suspend-syncing-thread
+                                                  (suspend-syncing-thread
                                                    s_0
                                                    timeout-at_0)
                                                   (set-syncing-wakeup!
@@ -9661,24 +9535,22 @@
                                                               (if polled-all?_0
                                                                 polled-all?_0
                                                                 now-polled-all?_0))))))
-                                                    (let ((temp48_1 temp48_0))
-                                                      (|#%app|
-                                                       sync-poll.1
-                                                       did-work?_0
-                                                       #t
-                                                       temp50_0
-                                                       #f
-                                                       #f
-                                                       unsafe-undefined
-                                                       temp48_1
-                                                       s_0)))))))))))
+                                                    (sync-poll.1
+                                                     did-work?_0
+                                                     #t
+                                                     temp50_0
+                                                     #f
+                                                     #f
+                                                     unsafe-undefined
+                                                     temp48_0
+                                                     s_0))))))))))
                                      (loop_0 #t #f))))))
                             (lambda ()
                               (begin
                                 (start-atomic)
                                 (thread-pop-suspend+resume-callbacks!)
                                 (thread-pop-kill-callback!)
-                                (|#%app| syncing-abandon! s_0)
+                                (syncing-abandon! s_0)
                                 (end-atomic)))))))))
                  (if enable-break?7_0
                    (let ((thunk_0
@@ -9706,8 +9578,7 @@
                                     (go_0 #f)
                                     (|#%app| (go_0 #t)))))
                               (|#%app| (go_0 #t))))))
-                     (|#%app|
-                      sync-poll.1
+                     (sync-poll.1
                       #f
                       #t
                       temp52_0
@@ -9797,7 +9668,7 @@
             (begin
               (call-with-values
                (lambda ()
-                 (|#%app| cross-commits-and-abandons commits14_0 abandons15_0))
+                 (cross-commits-and-abandons commits14_0 abandons15_0))
                (case-lambda
                 ((extended-commits_0 guarded-abandons_0)
                  (letrec*
@@ -9848,11 +9719,10 @@
                                      (if last_0
                                        (set-syncer-next! last_0 sr_0)
                                        (void))
-                                     (let ((app_0 (cdr evts_0)))
-                                       (loop_0
-                                        app_0
-                                        (if first_0 first_0 sr_0)
-                                        sr_0)))))))))))))
+                                     (loop_0
+                                      (cdr evts_0)
+                                      (if first_0 first_0 sr_0)
+                                      sr_0))))))))))))
                   (loop_0 evts17_0 #f #f)))
                 (args (raise-binding-result-arity-error 2 args)))))))))
     (case-lambda
@@ -10008,19 +9878,16 @@
                               (set-schedule-info-did-work?! sched-info_0 #t))
                              (end-atomic)
                              (loop_0 (syncer-next sr_0) 0 #f #f))
-                           (if (let ((app_0 nested-sync-evt?))
-                                 (|#%app| app_0 (syncer-evt sr_0)))
+                           (if (nested-sync-evt? (syncer-evt sr_0))
                              (begin
                                (end-atomic)
                                (call-with-values
                                 (lambda ()
-                                  (let ((app_0 poll-nested-sync))
-                                    (|#%app|
-                                     app_0
-                                     (syncer-evt sr_0)
-                                     just-poll?20_0
-                                     fast-only?21_0
-                                     sched-info_0)))
+                                  (poll-nested-sync
+                                   (syncer-evt sr_0)
+                                   just-poll?20_0
+                                   fast-only?21_0
+                                   sched-info_0))
                                 (case-lambda
                                  ((same?_0 new-evt_0)
                                   (if same?_0
@@ -10100,28 +9967,23 @@
                                                "choice event discovered after interrupt/retry callback"))
                                             (void))
                                           (let ((new-syncers_0
-                                                 (let ((app_0 random-rotate))
-                                                   (|#%app|
-                                                    app_0
+                                                 (random-rotate
+                                                  (let ((app_0
+                                                         (choice-evt-evts
+                                                          new-evt_0)))
                                                     (let ((app_1
-                                                           evts->syncers))
+                                                           (syncer-wraps
+                                                            sr_0)))
                                                       (let ((app_2
-                                                             (choice-evt-evts
-                                                              new-evt_0)))
-                                                        (let ((app_3
-                                                               (syncer-wraps
-                                                                sr_0)))
-                                                          (let ((app_4
-                                                                 (syncer-commits
-                                                                  sr_0)))
-                                                            (|#%app|
-                                                             app_1
-                                                             #f
-                                                             app_2
-                                                             app_3
-                                                             app_4
-                                                             (syncer-abandons
-                                                              sr_0))))))))))
+                                                             (syncer-commits
+                                                              sr_0)))
+                                                        (evts->syncers
+                                                         #f
+                                                         app_0
+                                                         app_1
+                                                         app_2
+                                                         (syncer-abandons
+                                                          sr_0))))))))
                                             (if (not new-syncers_0)
                                               (begin
                                                 (syncer-remove! sr_0 s32_0)
@@ -10533,8 +10395,8 @@
                             (let ((or-part_1 (never-evt? e_0)))
                               (if or-part_1
                                 or-part_1
-                                (if (|#%app| nested-sync-evt? e_0)
-                                  (let ((s_1 (|#%app| nested-sync-evt-s e_0)))
+                                (if (nested-sync-evt? e_0)
+                                  (let ((s_1 (nested-sync-evt-s e_0)))
                                     (if (not (syncing-selected s_1))
                                       (all-asynchronous? s_1)
                                       #f))
@@ -10556,8 +10418,8 @@
             (if (not sr_0)
               null
               (let ((e_0 (syncer-evt sr_0)))
-                (if (|#%app| nested-sync-evt? e_0)
-                  (let ((s_1 (|#%app| nested-sync-evt-s e_0)))
+                (if (nested-sync-evt? e_0)
+                  (let ((s_1 (nested-sync-evt-s e_0)))
                     (begin
                       (set-syncing-wakeup!
                        s_1
@@ -10791,8 +10653,7 @@
                (lambda ()
                  (let ((s_0
                         (let ((temp89_0
-                               (let ((app_0 evts->syncers))
-                                 (|#%app| app_0 'replace-evt (list evt_0)))))
+                               (evts->syncers 'replace-evt (list evt_0))))
                           (make-syncing.1 #f temp89_0))))
                    (values
                     #f
@@ -10805,7 +10666,7 @@
             orig-evt_0)))))))
 (define poll-nested-sync
   (lambda (ns_0 just-poll?_0 fast-only?_0 sched-info_0)
-    (let ((temp90_0 (|#%app| nested-sync-evt-s ns_0)))
+    (let ((temp90_0 (nested-sync-evt-s ns_0)))
       (let ((temp91_0
              (lambda (sched-info_1 polled-all?_0 no-wrappers?_0)
                (values polled-all?_0 ns_0))))
@@ -11210,16 +11071,14 @@
        (let ((c1_0 (current-future$1)))
          (if c1_0
            (let ((e_0
-                  (let ((app_0
-                         (if future-id6_0 future-id6_0 (future*-id c1_0))))
-                    (let ((app_1 (|#%app| get-pthread-id)))
-                      (future-event1.1
-                       app_0
-                       app_1
-                       action7_0
-                       (current-inexact-milliseconds)
-                       prim-name2_0
-                       data3_0)))))
+                  (let ((app_0 (|#%app| get-pthread-id)))
+                    (future-event1.1
+                     (if future-id6_0 future-id6_0 (future*-id c1_0))
+                     app_0
+                     action7_0
+                     (current-inexact-milliseconds)
+                     prim-name2_0
+                     data3_0))))
              (letrec*
               ((loop_0
                 (|#%name|
@@ -11301,15 +11160,13 @@
                                     or-part_0
                                     (eq? action_0 'sync)))
                                 #f)
-                            (let ((app_2
-                                   (if (eq? action_0 'block)
-                                     "HANDLING: "
-                                     "synchronizing: ")))
-                              (string-append
-                               app_2
-                               (symbol->string
-                                (let ((or-part_0 (future-event-prim-name e_0)))
-                                  (if or-part_0 or-part_0 '|[unknown]|)))))
+                            (string-append
+                             (if (eq? action_0 'block)
+                               "HANDLING: "
+                               "synchronizing: ")
+                             (symbol->string
+                              (let ((or-part_0 (future-event-prim-name e_0)))
+                                (if or-part_0 or-part_0 '|[unknown]|))))
                             (action->string action_0))))
                      (string-append
                       "id "
@@ -12588,27 +12445,26 @@
             loop
             (lambda (e_1 callbacks_1)
               (begin
-                (let ((app_0 TICKS))
-                  (|#%app|
-                   e_1
-                   app_0
-                   (if (pair? callbacks_1)
-                     (lambda ()
-                       (begin
-                         (current-thread-now-running!)
-                         (run-callbacks callbacks_1)
-                         (set! done?_0 #t)
-                         (engine-block)))
-                     void)
-                   (lambda (e_2 result_0 remaining_0)
+                (|#%app|
+                 e_1
+                 TICKS
+                 (if (pair? callbacks_1)
+                   (lambda ()
                      (begin
-                       (if e_2
-                         (void)
-                         (internal-error
-                          "thread ended while it should run callbacks atomically"))
-                       (if done?_0
-                         (swap-in-engine e_2 t_0 leftover-ticks_0)
-                         (loop_0 e_2 null)))))))))))
+                       (current-thread-now-running!)
+                       (run-callbacks callbacks_1)
+                       (set! done?_0 #t)
+                       (engine-block)))
+                   void)
+                 (lambda (e_2 result_0 remaining_0)
+                   (begin
+                     (if e_2
+                       (void)
+                       (internal-error
+                        "thread ended while it should run callbacks atomically"))
+                     (if done?_0
+                       (swap-in-engine e_2 t_0 leftover-ticks_0)
+                       (loop_0 e_2 null))))))))))
          (loop_0 e_0 callbacks_0))))))
 (define run-callbacks
   (lambda (callbacks_0)
@@ -12631,9 +12487,8 @@
       (end-atomic))))
 (define all-threads-poll-done?
   (lambda ()
-    (=
-     (hash-count (unsafe-place-local-ref cell.2$1))
-     (unsafe-place-local-ref cell.2))))
+    (let ((app_0 (hash-count (unsafe-place-local-ref cell.2$1))))
+      (= app_0 (unsafe-place-local-ref cell.2)))))
 (define process-sleep
   (lambda ()
     (let ((ts_0
@@ -12904,9 +12759,7 @@
                                                               (set! result-kind_0
                                                                 'value)
                                                               (thread-dead!
-                                                               (check-not-unsafe-undefined
-                                                                t_0
-                                                                't_80)))
+                                                               t_0))
                                                             (end-atomic)))
                                                         (engine-block))))))))))))
                                    (do-make-thread.1
@@ -12961,14 +12814,11 @@
                                          (make-thread-cell #f)
                                          (begin
                                            (if pending-break_0
-                                             (let ((app_0 (1/current-thread)))
-                                               (1/break-thread
-                                                app_0
-                                                (if (eq?
-                                                     pending-break_0
-                                                     'break)
-                                                  #f
-                                                  pending-break_0)))
+                                             (1/break-thread
+                                              (1/current-thread)
+                                              (if (eq? pending-break_0 'break)
+                                                #f
+                                                pending-break_0))
                                              (void))
                                            (if (eq? result-kind_0 'exn)
                                              (raise result_0)
@@ -13790,294 +13640,289 @@
                   (case-lambda
                    ((place-pch_0 child-pch_0)
                     (let ((orig-plumber_0 (1/make-plumber)))
-                      (let ((current-place15_0
-                             (unsafe-place-local-ref cell.1$2)))
-                        (let ((new-place_0
+                      (let ((new-place_0
+                             (let ((current-place15_0
+                                    (unsafe-place-local-ref cell.1$2)))
                                (make-place.1
                                 current-place15_0
                                 place-pch_0
                                 lock_0
-                                orig-cust_0)))
-                          (begin
-                            (set-custodian-place! orig-cust_0 new-place_0)
-                            (let ((done-waiting_0
-                                   (place-done-waiting new-place_0)))
-                              (let ((default-exit_0
-                                     (|#%name|
-                                      default-exit
-                                      (lambda (explicit?7_0 v9_0)
-                                        (begin
-                                          (begin
-                                            (let ((temp17_0
-                                                   (if explicit?7_0
-                                                     "exit (via `exit`)"
-                                                     "exit")))
-                                              (log-place.1
-                                               unsafe-undefined
-                                               #f
-                                               temp17_0))
-                                            (let ((flush-failed?_0 #f))
-                                              (begin
-                                                (plumber-flush-all/wrap
-                                                 orig-plumber_0
-                                                 (lambda (proc_0 h_0)
-                                                   (call-with-continuation-prompt
-                                                    (lambda ()
-                                                      (|#%app| proc_0 h_0))
-                                                    (default-continuation-prompt-tag)
-                                                    (lambda (thunk_0)
-                                                      (begin
-                                                        (set! flush-failed?_0
-                                                          #t)
-                                                        (call-with-continuation-prompt
-                                                         thunk_0))))))
-                                                (start-atomic)
-                                                (begin0
-                                                  (begin
-                                                    (|#%app|
-                                                     host:mutex-acquire
-                                                     lock_0)
-                                                    (set-place-queued-result!
-                                                     new-place_0
-                                                     (if flush-failed?_0
-                                                       1
-                                                       (if (byte? v9_0)
-                                                         v9_0
-                                                         0)))
-                                                    (place-has-activity!
-                                                     new-place_0)
-                                                    (|#%app|
-                                                     host:mutex-release
-                                                     lock_0))
-                                                  (end-atomic))
-                                                (engine-block)))))))))
-                                (begin
-                                  (start-atomic)
-                                  (let ((cref_0
-                                         (custodian-register-place
-                                          (1/current-custodian)
-                                          new-place_0
-                                          shutdown-place)))
-                                    (begin
-                                      (if cref_0
-                                        (void)
-                                        (begin
-                                          (end-atomic)
-                                          (let ((c_0 (1/current-custodian)))
-                                            (begin-unsafe
-                                             (raise-arguments-error
-                                              'dynamic-place
-                                              "the custodian has been shut down"
-                                              "custodian"
-                                              c_0)))))
+                                orig-cust_0))))
+                        (begin
+                          (set-custodian-place! orig-cust_0 new-place_0)
+                          (let ((done-waiting_0
+                                 (place-done-waiting new-place_0)))
+                            (let ((default-exit_0
+                                   (|#%name|
+                                    default-exit
+                                    (lambda (explicit?7_0 v9_0)
                                       (begin
-                                        (set-place-custodian-ref!
-                                         new-place_0
-                                         cref_0)
-                                        (call-with-values
-                                         (lambda ()
-                                           (|#%app|
-                                            make-place-ports+fds
-                                            in_0
-                                            out_0
-                                            err_0))
-                                         (case-lambda
-                                          ((parent-in_0
-                                            parent-out_0
-                                            parent-err_0
-                                            child-in-fd_0
-                                            child-out-fd_0
-                                            child-err-fd_0)
-                                           (begin
-                                             (|#%app|
-                                              host:mutex-acquire
-                                              lock_0)
-                                             (let ((host-thread_0
-                                                    (|#%app|
-                                                     host:fork-place
-                                                     (lambda ()
-                                                       (begin
-                                                         (unsafe-place-local-set!
-                                                          cell.1$2
-                                                          new-place_0)
-                                                         (call-in-another-main-thread
-                                                          orig-cust_0
-                                                          (lambda ()
+                                        (begin
+                                          (let ((temp17_0
+                                                 (if explicit?7_0
+                                                   "exit (via `exit`)"
+                                                   "exit")))
+                                            (log-place.1
+                                             unsafe-undefined
+                                             #f
+                                             temp17_0))
+                                          (let ((flush-failed?_0 #f))
+                                            (begin
+                                              (plumber-flush-all/wrap
+                                               orig-plumber_0
+                                               (lambda (proc_0 h_0)
+                                                 (call-with-continuation-prompt
+                                                  (lambda ()
+                                                    (|#%app| proc_0 h_0))
+                                                  (default-continuation-prompt-tag)
+                                                  (lambda (thunk_0)
+                                                    (begin
+                                                      (set! flush-failed?_0 #t)
+                                                      (call-with-continuation-prompt
+                                                       thunk_0))))))
+                                              (start-atomic)
+                                              (begin0
+                                                (begin
+                                                  (|#%app|
+                                                   host:mutex-acquire
+                                                   lock_0)
+                                                  (set-place-queued-result!
+                                                   new-place_0
+                                                   (if flush-failed?_0
+                                                     1
+                                                     (if (byte? v9_0) v9_0 0)))
+                                                  (place-has-activity!
+                                                   new-place_0)
+                                                  (|#%app|
+                                                   host:mutex-release
+                                                   lock_0))
+                                                (end-atomic))
+                                              (engine-block)))))))))
+                              (begin
+                                (start-atomic)
+                                (let ((cref_0
+                                       (custodian-register-place
+                                        (1/current-custodian)
+                                        new-place_0
+                                        shutdown-place)))
+                                  (begin
+                                    (if cref_0
+                                      (void)
+                                      (begin
+                                        (end-atomic)
+                                        (let ((c_0 (1/current-custodian)))
+                                          (begin-unsafe
+                                           (raise-arguments-error
+                                            'dynamic-place
+                                            "the custodian has been shut down"
+                                            "custodian"
+                                            c_0)))))
+                                    (begin
+                                      (set-place-custodian-ref!
+                                       new-place_0
+                                       cref_0)
+                                      (call-with-values
+                                       (lambda ()
+                                         (|#%app|
+                                          make-place-ports+fds
+                                          in_0
+                                          out_0
+                                          err_0))
+                                       (case-lambda
+                                        ((parent-in_0
+                                          parent-out_0
+                                          parent-err_0
+                                          child-in-fd_0
+                                          child-out-fd_0
+                                          child-err-fd_0)
+                                         (begin
+                                           (|#%app| host:mutex-acquire lock_0)
+                                           (let ((host-thread_0
+                                                  (|#%app|
+                                                   host:fork-place
+                                                   (lambda ()
+                                                     (begin
+                                                       (unsafe-place-local-set!
+                                                        cell.1$2
+                                                        new-place_0)
+                                                       (call-in-another-main-thread
+                                                        orig-cust_0
+                                                        (lambda ()
+                                                          (begin
+                                                            (set-place-id!
+                                                             new-place_0
+                                                             (|#%app|
+                                                              get-pthread-id))
                                                             (begin
-                                                              (set-place-id!
+                                                              (set-place-host-roots!
                                                                new-place_0
                                                                (|#%app|
-                                                                get-pthread-id))
+                                                                host:current-place-roots))
                                                               (begin
-                                                                (set-place-host-roots!
-                                                                 new-place_0
-                                                                 (|#%app|
-                                                                  host:current-place-roots))
+                                                                (1/current-thread-group
+                                                                 (unsafe-place-local-ref
+                                                                  cell.1))
                                                                 (begin
-                                                                  (1/current-thread-group
-                                                                   (unsafe-place-local-ref
-                                                                    cell.1))
+                                                                  (1/current-custodian
+                                                                   orig-cust_0)
                                                                   (begin
-                                                                    (1/current-custodian
-                                                                     orig-cust_0)
+                                                                    (1/current-plumber
+                                                                     orig-plumber_0)
                                                                     (begin
-                                                                      (1/current-plumber
-                                                                       orig-plumber_0)
+                                                                      (1/exit-handler
+                                                                       (lambda (v_0)
+                                                                         (default-exit_0
+                                                                          #t
+                                                                          v_0)))
                                                                       (begin
-                                                                        (1/exit-handler
-                                                                         (lambda (v_0)
-                                                                           (default-exit_0
-                                                                            #t
-                                                                            v_0)))
+                                                                        (current-pseudo-random-generator
+                                                                         (make-pseudo-random-generator))
                                                                         (begin
-                                                                          (current-pseudo-random-generator
+                                                                          (1/current-evt-pseudo-random-generator
                                                                            (make-pseudo-random-generator))
-                                                                          (begin
-                                                                            (1/current-evt-pseudo-random-generator
-                                                                             (make-pseudo-random-generator))
-                                                                            (let ((finish_0
-                                                                                   (|#%app|
-                                                                                    host:start-place
-                                                                                    child-pch_0
-                                                                                    path_0
-                                                                                    sym_0
-                                                                                    child-in-fd_0
-                                                                                    child-out-fd_0
-                                                                                    child-err-fd_0
-                                                                                    orig-cust_0
-                                                                                    orig-plumber_0
-                                                                                    inherited_0)))
-                                                                              (call-with-continuation-prompt
-                                                                               (lambda ()
-                                                                                 (begin
-                                                                                   (|#%app|
-                                                                                    host:mutex-acquire
-                                                                                    lock_0)
-                                                                                   (set-place-wakeup-handle!
-                                                                                    new-place_0
-                                                                                    (sandman-get-wakeup-handle))
-                                                                                   (|#%app|
-                                                                                    host:condition-signal
-                                                                                    started_0)
-                                                                                   (|#%app|
-                                                                                    host:mutex-release
-                                                                                    lock_0)
-                                                                                   (let ((temp20_0
-                                                                                          "enter"))
-                                                                                     (log-place.1
-                                                                                      unsafe-undefined
-                                                                                      #f
-                                                                                      temp20_0))
-                                                                                   (|#%app|
-                                                                                    finish_0)
-                                                                                   (default-exit_0
+                                                                          (let ((finish_0
+                                                                                 (|#%app|
+                                                                                  host:start-place
+                                                                                  child-pch_0
+                                                                                  path_0
+                                                                                  sym_0
+                                                                                  child-in-fd_0
+                                                                                  child-out-fd_0
+                                                                                  child-err-fd_0
+                                                                                  orig-cust_0
+                                                                                  orig-plumber_0
+                                                                                  inherited_0)))
+                                                                            (call-with-continuation-prompt
+                                                                             (lambda ()
+                                                                               (begin
+                                                                                 (|#%app|
+                                                                                  host:mutex-acquire
+                                                                                  lock_0)
+                                                                                 (set-place-wakeup-handle!
+                                                                                  new-place_0
+                                                                                  (sandman-get-wakeup-handle))
+                                                                                 (|#%app|
+                                                                                  host:condition-signal
+                                                                                  started_0)
+                                                                                 (|#%app|
+                                                                                  host:mutex-release
+                                                                                  lock_0)
+                                                                                 (let ((temp20_0
+                                                                                        "enter"))
+                                                                                   (log-place.1
+                                                                                    unsafe-undefined
                                                                                     #f
-                                                                                    0)))
-                                                                               (default-continuation-prompt-tag)
-                                                                               (lambda (thunk_0)
-                                                                                 (begin
-                                                                                   (call-with-continuation-prompt
-                                                                                    thunk_0)
-                                                                                   (default-exit_0
-                                                                                    #f
-                                                                                    1)))))))))))))))))
-                                                     (lambda (result_0)
-                                                       (begin
-                                                         (do-custodian-shutdown-all
-                                                          orig-cust_0)
-                                                         (let ((lst_0
-                                                                (place-post-shutdown
-                                                                 new-place_0)))
-                                                           (begin
-                                                             (letrec*
-                                                              ((for-loop_0
-                                                                (|#%name|
-                                                                 for-loop
-                                                                 (lambda (lst_1)
-                                                                   (begin
-                                                                     (if (pair?
-                                                                          lst_1)
-                                                                       (let ((proc_0
-                                                                              (unsafe-car
-                                                                               lst_1)))
-                                                                         (let ((rest_0
-                                                                                (unsafe-cdr
-                                                                                 lst_1)))
-                                                                           (begin
-                                                                             (|#%app|
-                                                                              proc_0)
-                                                                             (for-loop_0
-                                                                              rest_0))))
-                                                                       (values)))))))
-                                                              (for-loop_0
-                                                               lst_0))))
-                                                         (void)
-                                                         (kill-future-scheduler)
-                                                         (|#%app|
-                                                          host:mutex-acquire
-                                                          lock_0)
-                                                         (set-place-result!
-                                                          new-place_0
-                                                          result_0)
-                                                         (|#%app|
-                                                          host:mutex-release
-                                                          lock_0)
+                                                                                    temp20_0))
+                                                                                 (|#%app|
+                                                                                  finish_0)
+                                                                                 (default-exit_0
+                                                                                  #f
+                                                                                  0)))
+                                                                             (default-continuation-prompt-tag)
+                                                                             (lambda (thunk_0)
+                                                                               (begin
+                                                                                 (call-with-continuation-prompt
+                                                                                  thunk_0)
+                                                                                 (default-exit_0
+                                                                                  #f
+                                                                                  1)))))))))))))))))
+                                                   (lambda (result_0)
+                                                     (begin
+                                                       (do-custodian-shutdown-all
+                                                        orig-cust_0)
+                                                       (let ((lst_0
+                                                              (place-post-shutdown
+                                                               new-place_0)))
                                                          (begin
                                                            (letrec*
                                                             ((for-loop_0
                                                               (|#%name|
                                                                for-loop
-                                                               (lambda (i_0)
+                                                               (lambda (lst_1)
                                                                  (begin
-                                                                   (if i_0
-                                                                     (let ((pl_0
-                                                                            (hash-iterate-key
-                                                                             done-waiting_0
-                                                                             i_0)))
-                                                                       (begin
-                                                                         (wakeup-waiting
-                                                                          pl_0)
-                                                                         (for-loop_0
-                                                                          (hash-iterate-next
-                                                                           done-waiting_0
-                                                                           i_0))))
+                                                                   (if (pair?
+                                                                        lst_1)
+                                                                     (let ((proc_0
+                                                                            (unsafe-car
+                                                                             lst_1)))
+                                                                       (let ((rest_0
+                                                                              (unsafe-cdr
+                                                                               lst_1)))
+                                                                         (begin
+                                                                           (|#%app|
+                                                                            proc_0)
+                                                                           (for-loop_0
+                                                                            rest_0))))
                                                                      (values)))))))
                                                             (for-loop_0
-                                                             (hash-iterate-first
-                                                              done-waiting_0))))
-                                                         (void)
-                                                         (hash-clear!
-                                                          done-waiting_0))))))
-                                               (begin
-                                                 (set-place-host-thread!
-                                                  new-place_0
-                                                  host-thread_0)
-                                                 (|#%app|
-                                                  host:condition-wait
-                                                  started_0
-                                                  lock_0)
-                                                 (|#%app|
-                                                  host:mutex-release
-                                                  lock_0)
-                                                 (end-atomic)
-                                                 (let ((temp11_0 "create"))
-                                                   (let ((temp12_0
-                                                          (place-id
-                                                           new-place_0)))
-                                                     (let ((temp11_1 temp11_0))
-                                                       (log-place.1
-                                                        unsafe-undefined
-                                                        temp12_0
-                                                        temp11_1))))
-                                                 (values
-                                                  new-place_0
-                                                  parent-in_0
-                                                  parent-out_0
-                                                  parent-err_0)))))
-                                          (args
-                                           (raise-binding-result-arity-error
-                                            6
-                                            args)))))))))))))))
+                                                             lst_0))))
+                                                       (void)
+                                                       (kill-future-scheduler)
+                                                       (|#%app|
+                                                        host:mutex-acquire
+                                                        lock_0)
+                                                       (set-place-result!
+                                                        new-place_0
+                                                        result_0)
+                                                       (|#%app|
+                                                        host:mutex-release
+                                                        lock_0)
+                                                       (begin
+                                                         (letrec*
+                                                          ((for-loop_0
+                                                            (|#%name|
+                                                             for-loop
+                                                             (lambda (i_0)
+                                                               (begin
+                                                                 (if i_0
+                                                                   (let ((pl_0
+                                                                          (hash-iterate-key
+                                                                           done-waiting_0
+                                                                           i_0)))
+                                                                     (begin
+                                                                       (wakeup-waiting
+                                                                        pl_0)
+                                                                       (for-loop_0
+                                                                        (hash-iterate-next
+                                                                         done-waiting_0
+                                                                         i_0))))
+                                                                   (values)))))))
+                                                          (for-loop_0
+                                                           (hash-iterate-first
+                                                            done-waiting_0))))
+                                                       (void)
+                                                       (hash-clear!
+                                                        done-waiting_0))))))
+                                             (begin
+                                               (set-place-host-thread!
+                                                new-place_0
+                                                host-thread_0)
+                                               (|#%app|
+                                                host:condition-wait
+                                                started_0
+                                                lock_0)
+                                               (|#%app|
+                                                host:mutex-release
+                                                lock_0)
+                                               (end-atomic)
+                                               (let ((temp11_0 "create"))
+                                                 (let ((temp12_0
+                                                        (place-id
+                                                         new-place_0)))
+                                                   (let ((temp11_1 temp11_0))
+                                                     (log-place.1
+                                                      unsafe-undefined
+                                                      temp12_0
+                                                      temp11_1))))
+                                               (values
+                                                new-place_0
+                                                parent-in_0
+                                                parent-out_0
+                                                parent-err_0)))))
+                                        (args
+                                         (raise-binding-result-arity-error
+                                          6
+                                          args))))))))))))))
                    (args (raise-binding-result-arity-error 2 args)))))))))))))
 (define 1/place-break
   (let ((place-break_0
@@ -14749,21 +14594,23 @@
              (let ((wk1_0 (gensym 'write)))
                (let ((rk2_0 (gensym 'read)))
                  (let ((wk2_0 (gensym 'write)))
-                   (values
-                    (pchannel5.1
-                     (make-ephemeron wk1_0 mq1_0)
-                     (make-ephemeron rk2_0 mq2_0)
-                     rk1_0
-                     wk2_0
-                     (message-queue-out-key-box mq1_0)
-                     (message-queue-in-key-box mq2_0))
-                    (pchannel5.1
-                     (make-ephemeron wk2_0 mq2_0)
-                     (make-ephemeron rk1_0 mq1_0)
-                     rk2_0
-                     wk1_0
-                     (message-queue-out-key-box mq2_0)
-                     (message-queue-in-key-box mq1_0)))))))))))))
+                   (let ((app_0
+                          (pchannel5.1
+                           (make-ephemeron wk1_0 mq1_0)
+                           (make-ephemeron rk2_0 mq2_0)
+                           rk1_0
+                           wk2_0
+                           (message-queue-out-key-box mq1_0)
+                           (message-queue-in-key-box mq2_0))))
+                     (values
+                      app_0
+                      (pchannel5.1
+                       (make-ephemeron wk2_0 mq2_0)
+                       (make-ephemeron rk1_0 mq1_0)
+                       rk2_0
+                       wk1_0
+                       (message-queue-out-key-box mq2_0)
+                       (message-queue-in-key-box mq1_0))))))))))))))
 (define 1/place-channel-get
   (|#%name|
    place-channel-get
