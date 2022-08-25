@@ -1,8 +1,9 @@
 racket (8.6+dfsg1-1) unstable; urgency=medium
 
   * New upstream release
+  * Move man pages to racket-common
 
- -- David Bremner <bremner@debian.org>  Mon, 22 Aug 2022 09:21:33 -0700
+ -- David Bremner <bremner@debian.org>  Thu, 25 Aug 2022 06:43:45 -0700
 
 racket (8.5+dfsg1-1) unstable; urgency=medium
 
