@@ -25,7 +25,7 @@ to go with the German textbooks
 )
 (
   @#,racket[empty]
-  @#,racket[(make-pair pattern pattern)]
+  @#,racket[(cons pattern pattern)]
   @#,racket[(list pattern ...)]
 )
 ]
@@ -101,7 +101,7 @@ sich also auf das @racket[a] aus dem @racket[let*]-Ausdruck, nicht das
 		#:grammar [(pattern
 		                ...
 				empty
-				(make-pair pattern pattern)
+				(cons pattern pattern)
 				(list pattern ...)
 				)]]{
 Zu den Patterns aus der "Anfänger"-Sprache kommen noch drei neue hinzu:
@@ -109,7 +109,7 @@ Zu den Patterns aus der "Anfänger"-Sprache kommen noch drei neue hinzu:
 @itemlist[
 @item{Das Pattern @racket[empty] passt auf die leere Liste.}
 
-@item{Das Pattern @racket[(make-pair pattern pattern)] passt auf Paare, bei
+@item{Das Pattern @racket[(cons pattern pattern)] passt auf Cons-Listen, bei
   denen die beiden inneren Patterns auf @racket[first] bzw. @racket[rest] passen.}
 
 @item{Das Pattern [(list pattern ...)] passt auf Listen, die genauso

@@ -1023,8 +1023,10 @@ int scheme_intern_prim_opt_flags(int flags)
     }
   }
 
+  START_XFORM_SKIP;
   scheme_log_abort("too many flag combinations");
   abort();
+  END_XFORM_SKIP;
 
   return 0;
 }
@@ -2798,7 +2800,10 @@ Scheme_Object *scheme_object_name(Scheme_Object *a)
 {
   Scheme_Object *v;
 
-  v = scheme_struct_type_property_ref(scheme_object_name_property, a);
+  if (SCHEME_CHAPERONE_STRUCT_TYPEP(a))
+    v = NULL;
+  else
+    v = scheme_struct_type_property_ref(scheme_object_name_property, a);
 
   if (v) {
     if (SCHEME_INTP(v))

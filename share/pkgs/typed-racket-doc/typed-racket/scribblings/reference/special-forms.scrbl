@@ -250,6 +250,7 @@ variants.
 @defform[(for/hash type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for/hasheq type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for/hasheqv type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
+@defform[(for/hashalw type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for/vector type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for/or type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for/sum type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
@@ -260,6 +261,7 @@ variants.
 @defform[(for*/hash type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for*/hasheq type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for*/hasheqv type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
+@defform[(for*/hashalw type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for*/vector type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for*/or type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
 @defform[(for*/sum type-ann-maybe (for-clause ...) type-ann-maybe expr ...+)]
@@ -614,7 +616,13 @@ protect higher-order uses of the value.
 @ex[
 ((cast (lambda ([s : String]) s) (Any -> Any)) "hello")
 (eval:error ((cast (lambda ([s : String]) s) (Any -> Any)) 5))
-]}
+]
+
+@racket[cast] will wrap the value @racket[e] in a contract which will affect
+the runtime performance of reading and updating the value. This is needed when
+@racket[e] is a complex data type, such as a hash table. However, when the type
+of the value can be checked using a simple predicate, consider using
+@racket[assert] instead.}
 
 @defform*[[(inst e t ...)
            (inst e t ... t ooo bound)]]{

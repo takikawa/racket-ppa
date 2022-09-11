@@ -56,7 +56,7 @@ DEB_DH_BUILDDEB_ARGS := -- -Zxz
 # do not strip mred, as this fails on some arches
 DEB_DH_STRIP_ARGS_racket := -Xbin/mzscheme -Xbin/mred
 
-DEB_MAKE_INSTALL_TARGET= no-run
+DEB_MAKE_INSTALL_TARGET= .
 
 common-install-arch:: do-install-arch
 common-install-indep:: do-install-indep

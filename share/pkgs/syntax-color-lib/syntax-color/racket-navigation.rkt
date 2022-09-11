@@ -108,7 +108,7 @@
 ;; stick-to-next-sexp?: natural -> boolean
 (define stick-to-patterns
   '("'" "," ",@" "`" "#'" "#," "#`" "#,@"
-        "#&" "#;" "#hash" "#hasheq" "#ci" "#cs"))
+        "#&" "#;" "#hash" "#hashalw" "#hasheqv" "#hasheq" "#ci" "#cs"))
 
 (define stick-to-patterns-union
   (regexp (string-append

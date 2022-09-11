@@ -606,17 +606,19 @@
   (editor-prefs-panel-label "Edition")
   (general-prefs-panel-label "Général")
   (editor-general-prefs-panel-label "Edition générale")
-  (highlight-parens "Surligner les paires de parenthèses.")
+  (highlight-parens "Surligner les paires de parenthèses")
   (fixup-open-brackets "Ajuster automatiquement les crochets ouvrants")
   (fixup-close-parens "Ajuster automatiquement les parenthèses fermantes")
-  (flash-paren-match "Montrer la parenthèse correspondante.")
-  (map-delete-to-backspace "La touche Delete génére Backspace.")
-  (verify-exit "Confirmation pour quitter.")
-  (ask-before-changing-format "Confirmation avant de changer le format de sauvegarde.")
-  (wrap-words-in-editor-buffers "Continuer une longue ligne sur la ligne suivante, dans les éditeurs.")
-  (show-status-line "Montrer la barre de status.")
-  (count-columns-from-one "Compter les lignes et colonnes à partir de un.")
-  (display-line-numbers "Montrer les numéros de ligne et de colonne, pas la distance depuis le début de l'éditeur.")
+  (flash-paren-match "Montrer la parenthèse correspondante")
+  (backup-unsaved-files "Créer des auto-sauvegardes pour les fichiers modifiés")
+  (first-change-files "Créer des fichiers à la première modification")
+  (map-delete-to-backspace "La touche Delete génére Backspace")
+  (verify-exit "Confirmation pour quitter")
+  (ask-before-changing-format "Confirmer avant de changer le format de sauvegarde")
+  (wrap-words-in-editor-buffers "Continuer une longue ligne sur la ligne suivante, dans les éditeurs")
+  (show-status-line "Montrer la barre de status")
+  (count-columns-from-one "Compter les lignes et colonnes à partir de un")
+  (display-line-numbers "Montrer les numéros de ligne et de colonne, pas la distance depuis le début de l'éditeur")
   ; used for popup menu; right click on line/column box in bottom of drs window
   (show-line-and-column-numbers "Montrer les numéros de ligne et de colonne")
   ; used for popup menu; right click on line/column box in bottom of drs window
@@ -816,6 +818,7 @@
   (file-dne "Ce fichier n'existe pas.")
   (empty-filename "Le nom de fichier doit contenir au moins quelques lettres.")
   (that-is-dir-name "Ceci est un nom de répertoire.")
+  (use-platform-specific-file-dialogs "Utiliser les dialogues de sélection de fichiers qui sont spécifiques à la plateforme") ;; a preferences option
 
   ;;; raw menu names -- these must match the
   ;;; versions below, once the &s have been stripped.
@@ -1020,7 +1023,7 @@
   ;;; autosaving
   (error-autosaving "Erreur durant l'auto-sauvegarde de « ~a ».")
   (autosaving-turned-off "L'auto-sauvegarde est suspendue\njusqu'à ce que le fichier soit sauvegardé.")
-  ;(recover-autosave-files-frame-title "Recouvrer des fichiers auto-sauvegardés")
+  (recover-autosave-files-frame-title "Recouvrer des fichiers auto-sauvegardés")
   (autosave-details "Détails")
   (autosave-recover "Recouvrer")
   (autosave-unknown-filename "« inconnu »")
@@ -1063,15 +1066,15 @@
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  ;(autosave-autosave-label: "Fichier auto-sauvegardé :")
+  (autosave-autosave-label: "Fichier auto-sauvegardé :")
   (autosave-original-label: "Fichier original :")
-  ;(autosave-autosave-label "Fichier auto-sauvegardé")
+  (autosave-autosave-label "Fichier auto-sauvegardé")
   (autosave-original-label "Fichier original")
-  ;(autosave-compare-files "Comparer les fichiers auto-sauvegardés")
+  (autosave-compare-files "Comparer les fichiers auto-sauvegardés")
 
-  ;(autosave-show-autosave "Auto-sauvegarder un fichier") ;; title of a window showing the autosave file
+  (autosave-show-autosave "Auto-sauvegarder un fichier") ;; title of a window showing the autosave file
 
-  ;(autosave-explanation "DrRacket a trouvé des fichiers auto-sauvegardés, qui peuvent contenir votre travail non-sauvegardé.")
+  (autosave-explanation "DrRacket a trouvé des fichiers auto-sauvegardés, qui peuvent contenir votre travail non-sauvegardé.")
 
   (autosave-recovered! "Recouvré !") ;; status of an autosave file
   (autosave-deleted "Effacé")       ;; status of an autosave file
@@ -1083,7 +1086,7 @@
   (autosave-done "Continuer")
 
   ;; appears in the file dialog
-  ;(autosave-restore-to-where? "Sélectionnez un répertoire où sauvegarder le fichier auto-sauvegardé.")
+  (autosave-restore-to-where? "Sélectionnez un répertoire où sauvegarder le fichier auto-sauvegardé.")
 
   ;;; file modified warning
   (file-has-been-modified
@@ -1186,6 +1189,7 @@
   (close-tab "Fermer l'onglet")
    ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
   (close-tab-amp "Fermer l'onglet")
+  (reopen-closed-tab "Rouvrir un onglet qui a été fermé")
 
   ;;; edit menu
   (split-menu-item-label "Di&viser")
@@ -2191,5 +2195,21 @@
    " PATH par défaut a été configuré pour tous les utilisateurs en ajoutant le fichier"
    " ~a, pour pointer vers ~a. Voud pouvez annuler ce"
    " changement en supprimant ~a.")
+  (adding-racket/bin-no-paths.d
+   "Impossible d'ajouter racket à la ligne de commande car /etc/paths.d n'existe"
+   " pas.\n\nVous pouvez essayer d'exécuter la commande suivante dans une fenêtre de terminal pour"
+   " créer le répertoire :\n"
+   "    sudo mkdir /etc/paths.d\net ensuite essayer à nouveau.")
+  (added-racket/bin-to-path/windows
+   "Vous devez maintenant être capable d'utiliser racket et ses outils à partir de la"
+   " ligne de commande.\n\nLe"
+   " %PATH% par défaut à été configuré via l'entrée de registre"
+   " HKEY_CURRENT_USER\\Environment\\Path"
+   " pour pointer vers ~a et ~a.")
+  (didnt-add-racket/bin-to-path/unix
+   "DrRacket ne peut pas changer votre PATH sous unix, mais si vous"
+   " savez comment changer votre PATH vous-même,"
+   " ajoutez-y\n\n  ~a\n\n"
+   " .")
   (add-racket/bin-to-path "Configurer la ligne de commande pour racket…") ;; menu item label
   ); aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz AÂÀBCÇDEÉÊÈËFGHIÎÏJKLMNOÔPQRSTUÛÙÜVWXYZ “” «  » …

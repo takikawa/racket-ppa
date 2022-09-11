@@ -100,6 +100,7 @@
   (fasl-extflonum-type 39)
   (fasl-correlated-type 40)
   (fasl-undefined-type 41)
+  (fasl-prefab-type-type 42)
 
   ;; Unallocated numbers here are for future extensions
 
@@ -114,7 +115,8 @@
 (define-constants
   (fasl-hash-eq-variant    0)
   (fasl-hash-equal-variant 1)
-  (fasl-hash-eqv-variant   2))
+  (fasl-hash-eqv-variant   2)
+  (fasl-hash-equal-always-variant 3))
 
 ;; ----------------------------------------
 
@@ -173,7 +175,7 @@
        => (lambda (k)
             (loop k)
             (for ([e (in-vector (struct->vector v) 1)])
-              (loop e)))]
+              (loop e)))]      
       [(srcloc? v)
        (loop (srcloc-source v))]
       [(correlated? v)
@@ -182,6 +184,11 @@
        (for ([k (in-list (correlated-property-symbol-keys v))])
          (loop k)
          (loop (correlated-property v k)))]
+      [(and (struct-type? v)
+            (prefab-struct-type-key+field-count v))
+       => (lambda (k+c)
+            (loop (car k+c))
+            (loop (cdr k+c)))]
       [else (void)]))
   (define (treat-immutable? v) (or (not keep-mutable?) (immutable? v)))
   (define path->relative-path-elements (make-path->relative-path-elements))
@@ -350,6 +357,7 @@
            (write-byte (cond
                          [(hash-eq? v) fasl-hash-eq-variant]
                          [(hash-eqv? v) fasl-hash-eqv-variant]
+                         [(hash-equal-always? v) fasl-hash-equal-always-variant]
                          [else fasl-hash-equal-variant])
                        o)
            (write-fasl-integer (hash-count v) o)
@@ -372,6 +380,12 @@
                    (cons k (correlated-property v k))))]
           [(eq? v unsafe-undefined)
            (write-byte fasl-undefined-type o)]
+          [(and (struct-type? v)
+                (prefab-struct-type-key+field-count v))
+           => (lambda (k+c)
+                (write-byte fasl-prefab-type-type o)
+                (loop (car k+c))
+                (loop (cdr k+c)))]
           [else
            (if handle-fail
                (loop (handle-fail v))
@@ -510,6 +524,7 @@
                   (read-byte/no-eof i)
                   [(fasl-hash-eq-variant) (make-hasheq)]
                   [(fasl-hash-eqv-variant) (make-hasheqv)]
+                  [(fasl-hash-equal-always-variant) (make-hashalw)]
                   [else (make-hash)]))
       (define len (read-fasl-integer i))
       (for ([j (in-range len)])
@@ -520,6 +535,7 @@
                   (read-byte/no-eof i)
                   [(fasl-hash-eq-variant) #hasheq()]
                   [(fasl-hash-eqv-variant) #hasheqv()]
+                  [(fasl-hash-equal-always-variant) (hashalw)]
                   [else #hash()]))
       (define len (read-fasl-integer i))
       (for/fold ([ht ht]) ([j (in-range len)])
@@ -538,6 +554,8 @@
         (correlated-property c (car p) (cdr p)))]
      [(fasl-undefined-type)
       unsafe-undefined]
+     [(fasl-prefab-type-type)
+      (prefab-key->struct-type (loop) (loop))]
      [else
       (cond
         [(type . >= . fasl-small-integer-start)

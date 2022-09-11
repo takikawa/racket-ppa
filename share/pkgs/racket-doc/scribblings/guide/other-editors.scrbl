@@ -278,3 +278,9 @@ place to get help from Vimmers.
 
 The @hyperlink["https://sublime.wbond.net/packages/Racket"]{Racket package}
 provides support for syntax highlighting and building for Sublime Text.
+@; ------------------------------------------------------------
+
+@section{Visual Studio Code}
+
+The @hyperlink["https://marketplace.visualstudio.com/items?itemName=evzen-wybitul.magic-racket"]{Magic Racket}
+extension provides Racket support including REPL integration and syntax highlighting in Visual Studio Code.

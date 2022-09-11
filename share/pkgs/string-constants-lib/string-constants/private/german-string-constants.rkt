@@ -1002,6 +1002,7 @@
  (print-interactions "Interaktionen drucken…")
  (new-tab "Neuer Tab")
  (close-tab "Tab schließen")
+ (reopen-closed-tab "Geschlossenen Tab wieder öffnen")
 
  (close-tab-amp "Tab &schließen") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
  

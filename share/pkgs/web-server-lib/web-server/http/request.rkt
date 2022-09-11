@@ -8,7 +8,7 @@
          racket/match
          racket/port
          racket/promise
-         web-server/http/request-structs
+         (submod web-server/http/request-structs private)
          web-server/safety-limits
          (submod web-server/safety-limits private)
          web-server/private/connection-manager
@@ -68,6 +68,8 @@
                      (#:safety-limits safety-limits?)
                      (listof header?))]))
 
+(module+ private
+  (provide make-read-request))
 
 (module* internal-test #f
   (provide read-http-line/limited
@@ -76,7 +78,8 @@
            read-bindings&post-data/raw
            make-spooled-temporary-file
            (struct-out mime-part)
-           read-mime-multipart))
+           read-mime-multipart
+           bytes->nonnegative-integer))
 
 ;; **************************************************
 ;; read-request: connection number (input-port -> string string) -> request boolean?
@@ -93,7 +96,7 @@
                  #:max-request-body-length max-request-body-length)
     limits)
 
-  (define (do-read-request conn host-port port-addresses)
+  (lambda (conn host-port port-addresses)
     (reset-connection-timeout! conn read-timeout)
     (define ip (connection-i-port conn))
     (define-values (method uri major minor)
@@ -114,22 +117,14 @@
       (read-bindings&post-data/raw data-ip method uri headers
                                    #:safety-limits limits))
     (define request
-      (make-request method uri headers bindings/raw-promise raw-post-data
-                    host-ip host-port client-ip))
+      (make-request
+       method uri headers bindings/raw-promise raw-post-data
+       host-ip host-port client-ip))
     (define close?
       (or connection-close?
           (close-connection? headers major minor
                              client-ip host-ip)))
-    (values request close?))
-
-  (define (read-request conn host-port port-addresses)
-    (with-handlers ([exn:fail?
-                     (λ (exn)
-                       (kill-connection! conn)
-                       (raise exn))])
-      (do-read-request conn host-port port-addresses)))
-
-  read-request)
+    (values request close?)))
 
 (define read-request
   (make-read-request))
@@ -140,8 +135,23 @@
 ;; **************************************************
 ;; complete-request
 
-(define (hex-string->number s)
-  (string->number s 16))
+(define (bytes->nonnegative-integer bs [base 10])
+  (and (not (zero? (bytes-length bs)))
+       (case base
+         [(10)
+          (for/fold ([n 0])
+                    ([b (in-bytes bs)] #:when n)
+            (and (>= b 48) (<= b 58) (+ (* n 10) (- b 48))))]
+         [(16)
+          (for/fold ([n 0])
+                    ([b (in-bytes bs)] #:when n)
+            (or
+             (and (>= b 48) (<= b 57)  (+ (* n 16) (- b 48))) ;; 0-9
+             (and (>= b 65) (<= b 70)  (+ (* n 16) (- b 55))) ;; A-F
+             (and (>= b 97) (<= b 102) (+ (* n 16) (- b 87))) ;; a-f
+             ))]
+         [else
+          (raise-argument-error 'bytes->number "(or/c 10 16)" base)])))
 
 ; complete-request: inp (listof header) number number number -> inp (listof header)
 ; if the request contains chunked body data, then decode that data
@@ -161,7 +171,7 @@
          (define size-in-bytes
            (match (regexp-split #rx";" size-line)
              [(cons size-in-hex _)
-              (hex-string->number (bytes->string/utf-8 size-in-hex))]))
+              (bytes->nonnegative-integer size-in-hex 16)]))
 
          (cond
            [(zero? size-in-bytes) total-size]
@@ -319,8 +329,8 @@
                       (string->url (format "//~a" us))]
                      [else
                       u1]))
-                 (string->number (bytes->string/utf-8 major))
-                 (string->number (bytes->string/utf-8 minor)))])))
+                 (bytes->nonnegative-integer major)
+                 (bytes->nonnegative-integer minor))])))
 
 
 
@@ -377,15 +387,16 @@
          [(list-rest k v)
           (and (symbol? k)
                (string? v)
-               (make-binding:form (string->bytes/utf-8 (symbol->string k))
-                                  (string->bytes/utf-8 v)))])
+               (binding:form
+                (string->bytes/utf-8 (symbol->string k))
+                (string->bytes/utf-8 v)))])
        (url-query uri))))
 
   (define (read-data who proc)
     (match (headers-assq* #"Content-Length" headers)
       [(struct header (_ value))
        (cond
-         [(string->number (bytes->string/utf-8 value))
+         [(bytes->nonnegative-integer value)
           => (lambda (len)
                (when (> len max-body-length)
                  (network-error 'read-bindings "body length exceeds limit"))
@@ -436,8 +447,9 @@
                       "Couldn't extract form field name for file upload")]
 
                     [(#f (list _ _ f0 f1))
-                     (make-binding:form (or f0 f1)
-                                        (port->bytes contents))]
+                     (binding:form
+                      (or f0 f1)
+                      (port->bytes contents))]
 
                     [((list _ _ f00 f01) (list _ _ f10 f11))
                      (make-binding:file/port (or f10 f11)
@@ -484,20 +496,16 @@
              [#f
               ;; skip the & or do nothing on #<eof>
               (read-byte in)
-              (loop (cons (make-binding:form (urldecode key) #"")
-                          bindings))]
+              (loop (cons (binding:form (urldecode key) #"") bindings))]
 
              ;; k=...&...
              [(list _ value _)
-              (loop (cons (make-binding:form (urldecode key)
-                                             (urldecode value))
-                          bindings))])]
+              (loop (cons (binding:form (urldecode key) (urldecode value)) bindings))])]
 
           ;; k
           ;; k&
           [(list _ key (or #"" #"&"))
-           (loop (cons (make-binding:form (urldecode key) #"")
-                       bindings))]
+           (loop (cons (binding:form (urldecode key) #"") bindings))]
 
           ;; #<eof>
           [#f

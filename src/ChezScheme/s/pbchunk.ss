@@ -182,7 +182,7 @@
        [(fasl-type-vector fasl-type-immutable-vector)
         (chunk-vector! vec ci)]
        [else (void)])]
-    [(stencil-vector mask vec)
+    [(stencil-vector mask vec sys?)
      (chunk-vector! vec ci)]
     [(record maybe-uid size nflds rtd pad-ty* fld*)
      (for-each (lambda (fld)
@@ -218,7 +218,6 @@
 
 (define (instr-di-dest instr) (instr-d-dest instr))
 (define (instr-di-imm instr) (bitwise-arithmetic-shift-right instr 16))
-(define (instr-di-imm/unsigned instr) (bitwise-and (bitwise-arithmetic-shift-right instr 16) #xFFFFFF))
 
 (define (instr-adr-dest instr) (instr-di-dest instr))
 (define (instr-adr-imm instr) (bitwise-arithmetic-shift-right instr 12))
@@ -228,7 +227,7 @@
 (define (instr-drr-reg2 instr) (bitwise-and (bitwise-arithmetic-shift-right instr 16) #xF))
 
 (define (instr-dri-dest instr) (instr-d-dest instr))
-(define (instr-dri-reg1 instr) (bitwise-and (bitwise-arithmetic-shift-right instr 12) #xF))
+(define (instr-dri-reg instr) (bitwise-and (bitwise-arithmetic-shift-right instr 12) #xF))
 (define (instr-dri-imm instr) (bitwise-arithmetic-shift-right instr 16))
 
 (define (instr-i-imm instr) (bitwise-arithmetic-shift-right instr 8))
@@ -299,7 +298,7 @@
         [pb-mov-pb-d->s->d dr]
         [pb-mov-pb-i-bits->d-bits dr]
         [pb-mov-pb-d-bits->i-bits dr]
-        [pb-mov-pb-i-i-bits->d-bits dr]
+        [pb-mov-pb-i-i-bits->d-bits drr]
         [pb-mov-pb-d-lo-bits->i-bits dr]
         [pb-mov-pb-d-hi-bits->i-bits dr]
         [pb-bin-op-pb-no-signal-pb-add-pb-register drr]
@@ -416,10 +415,10 @@
         [pb-fence-pb-fence-store-store n]
         [pb-fence-pb-fence-acquire n]
         [pb-fence-pb-fence-release n]
-        [pb-call-arena-in n]
-        [pb-fp-call-arena-in n]
-        [pb-call-arena-out n]
-        [pb-fp-call-arena-out n]
+        [pb-call-arena-in di]
+        [pb-fp-call-arena-in di]
+        [pb-call-arena-out di]
+        [pb-fp-call-arena-out di]
         [pb-stack-call dr])]))
 
 (define (advance l sel i)
@@ -748,6 +747,8 @@
                                                                                  now-uses-flag?)))
          (define (keep-signalling)
            (loop (fx+ i instr-bytes) relocs headers labels (or start-i i) #t uses-flag?))
+         (define (skip)
+           (loop (fx+ i instr-bytes) relocs headers labels (or start-i i) flag-ready? uses-flag?))
          (define (stop-before)
            (if start-i
                (values start-i i uses-flag?)
@@ -780,8 +781,7 @@
              [(_ op drr/f) #'(keep-signalling)]
              [(_ op dri/f) #'(keep-signalling)]
              [(_ op literal) #'(keep-literal)]
-             [(_ op nop) #'($oops 'pbchunk "hit pb-nop; misplaced relocation or incorrect endianness?")]
-             [_ #'(keep #f)]))
+             [_ #'(skip)]))
          (instruction-cases instr dispatch))])))
 
 (define (emit-chunk-header o index sub-index? uses-flag?)
@@ -843,34 +843,33 @@
          (define (post)
            (if (>= i start-i) " " " */ "))
 
-         (define (emit-do _op)
-           (fprintf o "~ado_~a(0x~x);~a" (pre) _op uinstr (post)))
+         (define (emit-do _op . args)
+           (fprintf o "~ado_~a(~{~a~^, ~});~a" (pre) _op args (post)))
 
          (define (emit-return)
            (fprintf o "~areturn ip+code_rel(0x~x, 0x~x);~a" (pre) base-i i (post)))
 
          (define (r-form _op)
-           (emit-do _op)
-           (fprintf o "/* ~a */\n"
-                    (instr-dr-reg instr))
+           (emit-do _op (instr-dr-reg instr))
+           (fprintf o "\n")
            (next))
          
          (define (dr-form _op)
-           (emit-do _op)
+           (emit-do _op (instr-dr-dest instr) (instr-dr-reg instr))
            (fprintf o " /* r~a <- r~a */\n"
                     (instr-dr-dest instr)
                     (instr-dr-reg instr))
            (next))
          
          (define (di-form _op di-imm)
-           (emit-do _op)
+           (emit-do _op (instr-di-dest instr) di-imm)
            (fprintf o "/* r~a <- 0x~x */\n"
                     (instr-di-dest instr)
                     di-imm)
            (next))
          
          (define (drr-form _op)
-           (emit-do _op)
+           (emit-do _op (instr-drr-dest instr) (instr-drr-reg1 instr) (instr-drr-reg2 instr))
            (fprintf o "/* r~a <- r~a, r~a */\n"
                     (instr-drr-dest instr)
                     (instr-drr-reg1 instr)
@@ -878,10 +877,13 @@
            (next))
          
          (define (dri-form _op)
-           (emit-do _op)
+           (emit-do _op
+                    (instr-dri-dest instr)
+                    (instr-dri-reg instr)
+                    (instr-dri-imm instr))
            (fprintf o "/* r~a <- r~a, 0x~x */\n"
                     (instr-dri-dest instr)
-                    (instr-dri-reg1 instr)
+                    (instr-dri-reg instr)
                     (instr-dri-imm instr))
            (next))
 
@@ -912,7 +914,7 @@
                                drr dri drr/f dri/f dri/c
                                dri/x r r/f r/x i r/b i/b dr/b di/b n n/x
                                adr literal nop)
-               [(_ op di/u) #'(di-form '_op (instr-di-imm/unsigned instr))]
+               [(_ op di/u) #'(di-form '_op (instr-di-imm uinstr))]
                [(_ op di) #'(di-form '_op (instr-di-imm instr))]
                [(_ op di/f) #'(di-form '_op (instr-di-imm instr))]
                [(_ op dr) #'(dr-form '_op)]
@@ -928,7 +930,7 @@
                     (fprintf o "/* ~a: r~a <- r~a, 0x~x */\n"
                              '_op
                              (instr-dri-dest instr)
-                             (instr-dri-reg1 instr)
+                             (instr-dri-reg instr)
                              (instr-dri-imm instr))
                     (done))]
                [(_ op r) #'(r-form '_op)]
@@ -942,7 +944,7 @@
                     (done))]
                [(_ op i)
                 #'(begin
-                    (emit-do '_op)
+                    (emit-do '_op (instr-i-imm instr))
                     (fprintf o "/* 0x~x */\n"
                              (instr-i-imm instr))
                     (next))]
@@ -984,10 +986,11 @@
                            (next))]))]
                [(_ op dr/b)
                 #'(begin
-                    (fprintf o "~areturn ~a_addr(0x~x);~a/* r~a + r~a */\n"
+                    (fprintf o "~areturn get_~a_addr(~a, ~a);~a/* r~a + r~a */\n"
                              (pre)
                              '_op
-                             uinstr
+                             (instr-dr-dest instr)
+                             (instr-dr-reg instr)
                              (post)
                              (instr-dr-dest instr)
                              (instr-dr-reg instr))
@@ -995,10 +998,11 @@
                [(_ op di/b)
                 #'(let* ([delta (instr-i-imm instr)]
                          [target-label (fx+ i instr-bytes delta)])
-                    (fprintf o "~areturn ~a_addr(0x~x);~a/* r~a + 0x~x */\n"
+                    (fprintf o "~areturn get_~a_addr(~a, ~a);~a/* r~a + 0x~x */\n"
                              (pre)
                              '_op
-                             uinstr
+                             (instr-di-dest instr)
+                             (instr-di-imm instr)
                              (post)
                              (instr-di-dest instr)
                              (instr-di-imm instr))
@@ -1032,7 +1036,7 @@
                              (fx+ i instr-bytes)
                              (post))
                     (loop (fx+ i instr-bytes (constant ptr-bytes)) (cdr relocs) headers labels))]
-               [(_ op nop) #'($oops 'pbchunk "nop")])))
+               [(_ op nop) #'(next)])))
 
          (instruction-cases instr emit))])))
 
